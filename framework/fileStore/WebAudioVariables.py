@@ -1,0 +1,42 @@
+##########################################################################
+# If not stated otherwise in this file or this component's Licenses.txt
+# file the following copyright and licenses apply:
+#
+# Copyright 2024 RDK Management
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#########################################################################
+
+#Configurable Path for WebAudio Related Test Cases
+wpe_webkit_testcases_path = ""
+
+#Path of chromedriver executable is stored in test manager. Please add : before path.( :/home/tdk/)
+chromedriver_path=""
+
+#Mention how the script should validate the webaudio logs. (WebinspectPageLogs/deviceLogs)
+log_check_method="deviceLogs"
+
+app_bundle_name=""
+#Give Stream details in the order codec/No.ofChannels/SampleRate/Duration
+mp3_stream_info="mpeg,2,44100,540.7"
+m4a_stream_info="mp4,2,44100,540.6"
+dts_stream_info="dts,2,44100,540.6"
+wav_stream_info="wav,2,44100,540.6"
+
+#Update the details of SpeechSynthesisSelectedVoiceTest
+#The index of the voice to be selected for Speech Sythesis.
+ss_voice_index="3,5"
+#Voice name to be selected for Speech Synthesis
+ss_voice_name="Microsoft Adri Online (Natural) - Afrikaans (South Africa),Microsoft Anila Online (Natural) - Albanian (Albania)"
+
+ 

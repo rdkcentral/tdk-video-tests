@@ -1,0 +1,2524 @@
+##########################################################################
+# If not stated otherwise in this file or this component's Licenses.txt
+# file the following copyright and licenses apply:
+#
+# Copyright 2020 RDK Management
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#########################################################################
+import requests
+import json
+import time
+import os
+import inspect
+import configparser
+import BrowserPerformanceVariables
+from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common import exceptions
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import StaleElementReferenceException
+from SSHUtility import *
+import SSHUtility
+import re
+from datetime import datetime
+import importlib
+import subprocess
+import PerformanceTestVariables
+import sys
+import socket
+import ast
+import urllib.request, urllib.parse, urllib.error
+import web_socket_util
+import StabilityTestUtility
+import tdkStandAlonelib
+
+deviceIP=""
+devicePort=""
+deviceName=""
+deviceType=""
+deviceMac=""
+realpath=""
+logged_config_files = set()
+
+graphical_plugins_list = PerformanceTestVariables.graphical_plugins_list
+
+def log_device_config_file(config_file):
+    if config_file not in logged_config_files:
+        print("[INFO]: Using Device config file: %s" % config_file)
+        logged_config_files.add(config_file)
+
+PERFORMANCE_STEP_DESCRIPTIONS = {
+    "rdkservice_getPluginStatus": "Verify plugin status",
+    "rdkservice_setPluginStatus": "Set plugin status",
+    "rdkservice_getAllPluginStatus": "Read all plugin statuses",
+    "rdkservice_getValue": "Read device value",
+    "rdkservice_setValue": "Set device value",
+    "rdkservice_getValueWithParams": "Read device value with parameters",
+    "rdkservice_getReqValueFromResult": "Read required value from response",
+    "rdkv_getInstalledPackages": "Check installed application packages",
+    "rdkservice_download_app_bundle": "Download application bundle",
+    "rdkservice_install_app": "Install application package",
+    "rdkservice_uninstall_app": "Uninstall application package",
+    "rdkservice_launch_app": "Launch application",
+    "rdkservice_close_app": "Close application",
+    "rdkv_terminate_app": "Terminate application",
+    "rdkservice_executeLifeCycle": "Execute application lifecycle operation",
+    "setPS_value": "Set media player URL in PersistentStore",
+    "rdkservice_getBrowserScore_AnimationBenchmark": "Run animation browser benchmark",
+    "rdkservice_getBrowserScore_MotionMark": "Run MotionMark browser benchmark",
+    "rdkservice_getBrowserScore_Speedometer": "Run Speedometer browser benchmark",
+    "rdkservice_getBrowserScore_CSS3": "Run CSS3 browser benchmark",
+    "rdkservice_getBrowserScore_HTML5": "Run HTML5 browser benchmark",
+    "rdkservice_getBrowserScore_Kraken": "Run Kraken browser benchmark",
+    "rdkservice_getBrowserScore_Octane": "Run Octane browser benchmark",
+    "rdkservice_getBrowserScore_Smashcat": "Run SmashCat browser benchmark",
+    "rdkservice_getBrowserScore_SunSpider": "Run SunSpider browser benchmark",
+    "rdkservice_getBrowserURL": "Read browser target URL",
+    "rdkservice_getBluetoothMac": "Read Bluetooth MAC address",
+    "rdkservice_getCPULoad": "Read device CPU load",
+    "rdkservice_getMemoryUsage": "Read device memory usage",
+    "rdkservice_getMaxResponseTime": "Measure service response time",
+    "rdkservice_getRequiredLog": "Read required device log",
+    "rdkservice_getSSHParams": "Read device SSH parameters",
+    "rdkservice_validateCPULoad": "Validate device CPU load",
+    "rdkservice_validateMemoryUsage": "Validate device memory usage",
+    "rdkservice_validatePluginFunctionality": "Validate plugin functionality",
+    "rdkservice_validateProcEntry": "Validate device process entry",
+    "rdkservice_memcrApps_executeLifeCycle": "Execute memory-test app lifecycle",
+    "memcr_appMemorySize": "Measure application memory usage",
+    "memcr_getProcessID": "Read application process ID",
+    "rdkservice_validateResourceUsage": "Validate resource usage",
+    "rdkservice_rebootDevice": "Reboot device",
+}
+
+
+def get_step_description(method, params, calling_suite=None):
+    description = PERFORMANCE_STEP_DESCRIPTIONS.get(method, method)
+    if (method == "rdkservice_getPluginStatus" and params.get("plugin") == "org.rdk.PersistentStore"
+            and calling_suite == "rdkv_media"):
+        # PersistentStore check in media pre-requisites is immediately followed by setting the test URL in it
+        description = "Verify PersistentStore status and set URL in it"
+    elif method == "rdkservice_getPluginStatus" and params.get("plugin"):
+        description = "%s: %s" % (description, params["plugin"])
+    elif method == "rdkservice_setPluginStatus" and params.get("plugin"):
+        description = "%s: %s" % (description, params["plugin"])
+        if params.get("status"):
+            description = "%s (%s)" % (description, params["status"])
+    elif method in ("rdkservice_getValue", "rdkservice_setValue",
+                    "rdkservice_getValueWithParams") and params.get("method"):
+        description = "%s: %s" % (description, params["method"])
+    elif method == "rdkservice_getRequiredLog" and params.get("command"):
+        description = "%s: %s" % (description, params["command"])
+    return description
+
+#METHODS
+#---------------------------------------------------------------
+#INITIALIZE THE MODULE
+#---------------------------------------------------------------
+def init_module(libobj,port,deviceInfo):
+    global deviceIP
+    global devicePort
+    global deviceName
+    global deviceType
+    global libObj
+    global realpath
+    global deviceMac
+    deviceIP = libobj.ip;
+    devicePort = port
+    deviceName = deviceInfo["devicename"]
+    deviceType = deviceInfo["boxtype"]
+    libObj = libobj
+    try:
+        deviceMac = deviceInfo["mac"]
+        SSHUtility.deviceMAC = deviceMac
+        SSHUtility.realpath = libobj.realpath
+    except Exception as e:
+        print("\nException Occurred while getting MAC \n")
+        print(e)
+
+#-------------------------------------------------------------------
+#GET THE WEBINSPECT PORT FROM THE DEVICE LOG VIA SSH
+#-------------------------------------------------------------------
+def get_webinspect_port(app_name):
+    try:
+        # Get SSH parameters from configuration file
+        ssh_params = rdkservice_getSSHParams(libObj.realpath, deviceIP)
+        if ssh_params == "" or ssh_params == "{}":
+            raise Exception("Failed to get SSH parameters from configuration")
+        
+        ssh_param_dict = json.loads(ssh_params)
+        ssh_method = ssh_param_dict.get("ssh_method")
+        credentials = ssh_param_dict.get("credentials")
+        
+        if not ssh_method or not credentials:
+            raise Exception("SSH method or credentials not found in configuration")
+        
+        # Execute command on DUT to get inspector port from dacapp log
+        cmd = "grep DEFAULT_APP_STORAGE_PATH /etc/device.properties | cut -d'=' -f2"
+        log_path = rdkservice_getRequiredLog(ssh_param_dict["ssh_method"], ssh_param_dict["credentials"], cmd)
+        log_path = log_path.split("\n")[1].strip()
+        log_file = log_path +"/" + app_name + "/"+ app_name+".log"
+        cmd = "cat " + log_file + "  | grep 'inspector port set to'"
+        output = rdkservice_getRequiredLog(ssh_method, credentials, cmd)
+        
+        if output == "EXCEPTION" or output == "":
+            raise Exception("Failed to retrieve log output from DUT")
+        
+        # Parse the port number from output
+        for line in output.splitlines():
+            match = re.search(r'inspector port set to\s+(\d+)', line, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        
+        # If no port found in output
+        raise Exception("Inspector port not found in dacapp log output")
+                
+    except Exception as e:
+        print("Unable to get webinspect port from dacapp log:", e)
+        raise
+
+
+#---------------------------------------------------------------
+#POST CURL REQUEST USING PYTHON REQUESTS
+#---------------------------------------------------------------
+def postCURLRequest(data):
+    status = "SUCCESS"
+    json_response={}
+    headers = {'content-type': 'text/plain;',}
+    url = 'http://'+str(deviceIP)+':'+str(devicePort)+'/jsonrpc'
+    try:
+        response = requests.post(url, headers=headers, data=data, timeout=20)
+        json_response = json.loads(response.content)
+    except requests.exceptions.RequestException as e:        
+        if "org.rdk.Network.1.setInterfaceEnabled" in str(data):        
+            response = "SUCCESS"
+        else:
+            status = "FAILURE"
+            print("ERROR!! \nEXCEPTION OCCURRED WHILE EXECUTING CURL COMMANDS!!")
+            print("Command : ",data)
+            print("Error message received :\n",e);
+            response = "EXCEPTION OCCURRED"
+    return response,json_response,status
+
+#---------------------------------------------------------------
+#EXECUTE CURL REQUESTS
+#---------------------------------------------------------------
+def execute_step(Data,IsPerformanceStressTest="NO"):
+    status = "SUCCESS"
+    try:
+        data = '{"jsonrpc": "2.0", "id": 1234567890, '+Data+'}'
+        response,json_response,status = postCURLRequest(data)
+        if status == "SUCCESS":
+            print("\n---------------------------------------------------------------------------------------------------")
+            print("JSON REQUEST : ", data)
+            print("\nJSON RESPONSE : ", json_response, "\n")
+            print("----------------------------------------------------------------------------------------------------\n")
+            result = json_response.get("result")
+            if result is None and "error" in json_response:
+                result = "EXCEPTION OCCURRED"
+            elif result != None and "'success': False" in str(result):
+                result = "EXCEPTION OCCURRED"
+
+            #Whether to check the API response time
+            conf_file,result_conf = getConfigFileName(libObj.realpath)
+            perf_status, IsPerformanceSelected = getDeviceConfigKeyValue(conf_file, "RDKV_CERT_PERFORMANCE")
+            if IsPerformanceStressTest == "True":
+                time_taken = round(response.elapsed.total_seconds() * 1000, 3)
+                print ("Time Taken for",Data,"is :", time_taken, "ms")
+                return time_taken
+            if IsPerformanceStressTest == "YES" or IsPerformanceSelected == "true":
+                time_taken = round(response.elapsed.total_seconds() * 1000, 3)
+                print ("Time Taken for",Data,"is :", time_taken, "ms")
+                output_file = '{}{}_{}_{}_ServiceAPIResponseTime.txt'.format(libObj.logpath,str(libObj.execID),str(libObj.execDevId),str(libObj.resultId))
+                time_data = Data + ":" + str(time_taken) + " ms"
+                write_time_data(Data,str(time_taken),output_file)
+            if IsPerformanceStressTest == "NO" and IsPerformanceSelected == "true":
+                result_time, max_response_time = getDeviceConfigKeyValue(conf_file,"MAX_RESPONSE_TIME")
+                if (float(time_taken) <= 0 or float(time_taken) > float(max_response_time)):
+                    print("Device took more than usual to respond.")
+                    print("Exiting the script")
+                    result = "EXCEPTION OCCURRED"
+        else:
+            result = response;
+        return result;
+    except requests.exceptions.RequestException as e:
+        print("ERROR!! \nEXCEPTION OCCURRED WHILE EXECUTING CURL COMMANDS!!")
+        print("Error message received :\n",e);
+        return "EXCEPTION OCCURRED"
+
+#-----------------------------------------------------------------
+#GET PLUGIN STATUS
+#-----------------------------------------------------------------
+def rdkservice_getPluginStatus(plugin):
+    data = '"method": "Controller.1.status@'+plugin+'"'
+    result = execute_step(data)
+    if result != None and result != "EXCEPTION OCCURRED":
+        for x in result:
+            WebKitStatus=x["state"]
+        return WebKitStatus
+    else:
+        return result;
+
+#-----------------------------------------------------------------
+#GET THE STATUS OF ALL PLUGIN
+#-----------------------------------------------------------------
+def rdkservice_getAllPluginStatus():
+    statusofPlugin=[];
+    data = '"method": "Controller.1.status"'
+    result = execute_step(data)
+    if result != "EXCEPTION OCCURRED":
+        for x in result:
+            plugin = x["callsign"]
+            state = x["state"]
+            if "autostart" in list(x.keys()):
+                autostart = x["autostart"]
+            else:
+                autostart = "null"
+            statusofPlugin.append([plugin,state,autostart]);
+        return statusofPlugin;
+    else:
+        return result;
+
+#------------------------------------------------------------------
+#GET MAX RESPONSE TIME
+#------------------------------------------------------------------
+def rdkservice_getMaxResponseTime(method):
+    data = '"method": "'+method+'"'
+    result = execute_step(data,"True")
+    return result
+#------------------------------------------------------------------
+#SET PLUGIN STATUS
+#------------------------------------------------------------------
+def rdkservice_setPluginStatus(plugin,status,uri=''):
+    data = ''
+    if plugin in graphical_plugins_list:
+        rdkshell_activated = check_status_of_rdkshell()
+        if rdkshell_activated:
+            if status in "activate":
+                data = '"method":"org.rdk.RDKShell.1.launch", "params":{"callsign": "'+plugin+'", "type":"", "uri":"'+uri+'"}'
+            else:
+                data = '"method":"org.rdk.RDKShell.1.destroy", "params":{"callsign": "'+plugin+'"}'
+    else:
+        data = '"method": "Controller.1.'+status+'", "params": {"callsign": "'+plugin+'"}'
+    if data != '':
+        result = execute_step(data)
+    else:
+        result = "EXCEPTION OCCURRED"
+    return result
+
+#-------------------------------------------------------------------
+#CHANGE STATE OF PLUGIN
+#-------------------------------------------------------------------
+def rdkservice_setPluginState(plugin,state):
+    data = '"method": "'+plugin+'.1.state","params": "'+state+'"'
+    result = execute_step(data)
+    return result
+
+#-------------------------------------------------------------------
+#GET THE VALUE OF A METHOD
+#-------------------------------------------------------------------
+def rdkservice_getValue(method):
+    data = '"method": "'+method+'"'
+    result = execute_step(data)
+    return result
+
+#-------------------------------------------------------------------
+#GET THE REQUIRED VALUE FROM A RESULT
+#-------------------------------------------------------------------
+def rdkservice_getReqValueFromResult(method,reqValue):
+    data = '"method": "'+method+'"'
+    result = execute_step(data)
+    if result != "EXCEPTION OCCURRED":
+        value = result[reqValue]
+        return value
+    else:
+        return result
+
+#-------------------------------------------------------------------
+#GET THE VALUE OF METHOD WITH PARAMETERS
+#-------------------------------------------------------------------
+def rdkservice_getValueWithParams(method,params):
+    data = '"method": "'+method+'","params": '+params
+    result = execute_step(data)
+    return result
+
+#------------------------------------------------------------------
+#SET VALUE FOR A METHOD
+#------------------------------------------------------------------
+def rdkservice_setValue(method,value):
+    data = '"method": "'+method+'","params": '+value
+    result = execute_step(data)
+    return result
+
+#------------------------------------------------------------------
+#GET THE NUMBER OF PLUGINS
+#------------------------------------------------------------------
+def rdkservice_getNoOfPlugins():
+    status = rdkservice_getAllPluginStatus();
+    if status != "EXCEPTION OCCURRED":
+        NoofPlugins = len(status)
+        return  NoofPlugins;
+    else:
+        return status;
+
+#-------------------------------------------------------------------
+#SET WEBDRIVER AND OPEN CHROME BROWSER
+#-------------------------------------------------------------------
+def openChromeBrowser(url):
+    #https://askubuntu.com/questions/432255/what-is-the-display-environment-variable
+    os.environ["DISPLAY"] = BrowserPerformanceVariables.display_variable;
+    os.environ["PATH"] += BrowserPerformanceVariables.path_of_browser_executable;
+    try:
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument("window-size=1920x1080")
+        driver = webdriver.Chrome(chrome_options=chrome_options) #Opening Chrome
+        driver.get(url);
+    except Exception as error:
+        print("Got exception while opening the browser")
+        print(error)
+        driver = "EXCEPTION OCCURRED"
+    return driver;
+
+#-------------------------------------------------------------------
+#GET URL FROM WEBINSPECT PAGE
+#-------------------------------------------------------------------
+def rdkservice_getBrowserURL(webinspect_port):
+    try:
+        webinspectURL = 'http://'+deviceIP+':'+str(webinspect_port)+'/'
+        print (webinspectURL)
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(20)
+            target_url = driver.find_element_by_xpath('//*[@id="targetlist"]/table/tbody/tr/td[1]/div[2]').text
+            print (target_url)
+            driver.quit()
+    except Exception as error:
+        print("Got exception while opening the browser")
+        print(error)
+        driver.quit()
+        target_url=json.dumps(target_url)
+    return target_url
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM CSS3 TEST
+#-------------------------------------------------------------------
+def rdkservice_getBrowserScore_CSS3():
+    try:
+        browser_score_dict = {}
+        browser_subcategory_list = BrowserPerformanceVariables.css3_test_subcategory_list
+
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port("com.rdkcentral.css3")
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            head = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[2]/span/span/span')
+            source = action.move_to_element(head).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(60)
+            browser_score= driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol[2]/ol/ol[1]/ol[2]/ol[1]/li[2]/span/span[2]').text
+            browser_score_dict["main_score"] = browser_score.replace("%","")
+            print("\nThe Browser score using CSS3 test is : ",browser_score)
+            print("\n Subcategory scores:\n")
+            print("====================================")
+            for i in range(1,130):
+                sub_category = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol[2]/ol/ol[1]/ol[3]/ol['+str(i)+']/ol[1]/li[1]/span/span').text
+
+                parent = driver.find_elements_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol[2]/ol/ol[1]/ol[2]/ol['+str(i)+']/ol[1]/li')
+                count = len(parent)
+                score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol[2]/ol/ol[1]/ol[3]/ol['+str(i)+']/ol[1]/li[3]/span/span[2]').text
+                if sub_category in browser_subcategory_list:
+                    new_score = score.replace("%","")
+                    browser_score_dict[sub_category] = new_score
+                print(sub_category + '  :  ' + score)
+            print('\n')
+            time.sleep(5)
+            driver.quit()
+        else:
+            browser_score_dict["main_score"]= "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM OCTANE TEST
+#-------------------------------------------------------------------
+def rdkservice_getBrowserScore_Octane():
+    try:
+        browser_score_dict = {}
+        browser_subcategory_list = BrowserPerformanceVariables.octane_test_subcategory_list
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port("com.rdkcentral.octane")
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[3]/span/span/span[1]')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(10)
+            browser_score= driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol/ol/li[1]/span/span[2]').text
+            browser_score_dict["main_score"] = browser_score
+            print("\nThe Browser score using Octane test is : ",browser_score)
+            print("\n Subcategory scores:\n")
+            print("====================================")
+            for i in range(1,5):
+                for j in range(1,5):
+                    sub_category = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[3]/ol['+str(i)+']/ol['+str(j)+']/ol/li[1]/span/span[2]').text
+                    score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[3]/ol['+str(i)+']/ol['+str(j)+']/ol/li[2]/span/span[2]').text
+                    if sub_category in browser_subcategory_list:
+                        browser_score_dict[sub_category] = score
+                    print(sub_category + '     :    ' + score)
+            sub_category = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[3]/ol[4]/ol[5]/ol/li[1]/span/span[2]').text
+            score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[3]/ol[4]/ol[5]/ol/li[2]/span/span[2]').text
+            if sub_category in browser_subcategory_list:
+                browser_score_dict[sub_category] = score
+            print(sub_category + '     :    ' + score + '\n')
+            time.sleep(10)
+            driver.quit()
+        else:
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict
+
+#----------------------------------------------------------------------
+#GET THE NAME OF DEVICE CONFIG FILE
+#----------------------------------------------------------------------
+def getConfigFileName(basePath):
+    deviceConfigFile=""
+    status ="SUCCESS"
+    configPath = os.path.join(
+        os.path.normpath(basePath), "fileStore", "tdkvRDKServiceConfig"
+    )
+    deviceNameConfigFile = configPath + "/" + deviceName + ".config"
+    deviceTypeConfigFile = configPath + "/" + deviceType + ".config"
+
+    # Check whether device / platform config files required for
+    # executing the test are present
+    if os.path.exists(deviceNameConfigFile) == True:
+        deviceConfigFile = deviceNameConfigFile
+        log_device_config_file(deviceNameConfigFile)
+    elif os.path.exists(deviceTypeConfigFile) == True:
+        deviceConfigFile = deviceTypeConfigFile
+        log_device_config_file(deviceTypeConfigFile)
+    else:
+        status = "FAILURE"
+        print("[ERROR]: No Device config file found : %s or %s" %(deviceNameConfigFile,deviceTypeConfigFile))
+    return deviceConfigFile,status;
+
+#-------------------------------------------------------------------------
+#GET THE VALUES FROM DEVICE CONFIG FILE
+#-------------------------------------------------------------------------
+def getDeviceConfigKeyValue(deviceConfigFile,key):
+    value  = ""
+    status = "SUCCESS"
+    deviceConfig  = "device.config"
+    try:
+        # If the key is none object or empty then exception
+        # will be thrown
+        if key is None or key == "":
+            status = "FAILURE"
+            print("\nException Occurred: [%s] key is None or empty" %(inspect.stack()[0][3]))
+        # Parse the device configuration file and read the
+        # data. But if the data is empty it is taken as such
+        else:
+            config = configparser.ConfigParser()
+            config.read(deviceConfigFile)
+            value = str(config.get(deviceConfig,key))
+    except Exception as e:
+        status = "FAILURE"
+        print("\nException Occurred: [%s] %s" %(inspect.stack()[0][3],e))
+
+    return status,value
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM HTML5 TEST
+#-------------------------------------------------------------------
+def rdkservice_getBrowserScore_HTML5():
+    try:
+        browser_score_dict = {}
+        browser_subcategory_list = BrowserPerformanceVariables.html5_test_subcategory_list
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port()
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[2]/span/span/span[1]')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(5)
+            browser_score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[2]/ol[3]/ol[1]/ol[1]/ol/li[2]/span/span[2]').text
+            max_browser_score_text = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol[1]/ol[2]/ol[3]/ol[1]/ol[1]/ol/li[3]/span/span[2]').text
+            browser_score = browser_score + ' ' + max_browser_score_text
+            browser_score_dict["main_score"] = browser_score
+            print("\n Browser score from HTML5 test: {}".format(browser_score))
+            print("\n Subcategory scores:\n")
+            print("====================================")
+            for i in range(1,3):
+                for j in range(1,5):
+                    parent = driver.find_elements_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol[1]/ol[2]/ol[3]/ol[2]/ol/ol['+str(i)+']/ol/ol['+str(j)+']/ol')
+                    count = len(parent)
+                    for k in range(2,count+1):
+                        sub_category = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol[1]/ol[2]/ol[3]/ol[2]/ol/ol['+str(i)+']/ol/ol['+str(j)+']/ol['+str(k)+']/ol[1]/ol/ol/li[1]/span/span').text
+                        score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol[1]/ol[2]/ol[3]/ol[2]/ol/ol['+str(i)+']/ol/ol['+str(j)+']/ol['+str(k)+']/ol[1]/ol/ol/ol/ol/li[1]/span/span[2]').text
+                        if sub_category in browser_subcategory_list:
+                            browser_score_dict[sub_category] = score.split('/')[0]
+                        print("{}   :{}".format(sub_category,score))
+            time.sleep(5)
+            driver.quit()
+        else:
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict;
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM SUNSPIDER TEST
+#-------------------------------------------------------------------
+def rdkservice_getBrowserScore_SunSpider():
+    try:
+        browser_score = ''
+        browser_score_dict = {}
+        browser_subcategory_list = BrowserPerformanceVariables.sunspider_test_subcategory_list
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port()
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(60)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[2]/span/span/span[1]')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(10)
+            parent = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol[2]/ol[5]')
+            children = parent.find_elements_by_tag_name("li")
+            text_values = ''
+            total_score_text = 'Total:'
+            for child in children:
+                text_values += child.text
+                if total_score_text in child.text:
+                    browser_score = child.text
+            if browser_score == '':
+                browser_score_dict["main_score"] = "FAILURE"
+            else:
+                browser_score_dict["main_score"] = browser_score.split("Total: ")[1]
+            driver.quit()
+            text_values = text_values.replace('<br>','\n').replace('</pre>','\n')
+            text_list = text_values.split('\n')
+            for category in text_list:
+                sub_category_list = category.replace("\"","").split(':')
+                sub_category = sub_category_list[0].strip()
+                if sub_category in browser_subcategory_list:
+                    score = sub_category_list[1].split('ms')[0].strip()
+                    browser_score_dict[sub_category] = score
+            print("Details of SunSider Test:\n",text_values)
+        else:
+            browser_score_dict["main_score"] = "FAILURE"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "FAILURE"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict;
+
+#-------------------------------------------------------------------
+#GET THE TIMESTAMP FROM THE LOG STRING
+#-------------------------------------------------------------------
+def getTimeStampFromString(log_string):
+  match = re.search(r'\d{2}:\d{2}:\d{2}\.\d+', log_string)
+  if match:
+    timestamp = match.group()
+    milliseconds = timestamp.split('.')[1]
+    return timestamp[:-len(milliseconds)] + milliseconds
+  else:
+    return None
+
+#-----------------------------------------------------------------
+#Write time data to a file
+#-----------------------------------------------------------------
+def write_time_data(Data,time_taken,filename):
+    method=Data.split('"method":')[-1].strip()
+    ifpresent=False
+    if os.path.isfile(filename):
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+        with open(filename, 'w') as f:
+            for i in range(len(lines)):
+                if method in lines[i]:
+                    time_data = lines[i].strip() + f', {time_taken}\n'
+                    f.write(time_data)
+                    ifpresent=True
+                else:
+                    f.write(lines[i])
+
+    if not ifpresent:
+        time_data=f"{method}:{time_taken}\n"
+        with open(filename, 'a+') as f:
+            f.write(time_data)
+
+#-------------------------------------------------------------------
+#GET THE TIME IN MILLISEC FROM THE STRING
+#-------------------------------------------------------------------
+def getTimeInMilliSec(time_string):
+    microsec_frm_time_string = time_string.split(".")[-1][:3]
+    time_string = time_string.replace(time_string.split(".")[-1], "")
+    time_string = time_string.replace(".", ":")
+    time_string = time_string + str(microsec_frm_time_string)
+    hours, minutes, seconds, millisec = time_string.split(':')
+    time_in_millisec = int(hours) * 3600000 + int(minutes) * 60000 + int(seconds)*1000 + int(millisec)
+    return time_in_millisec
+#-------------------------------------------------------------------
+#GET THE NUMERIC VALUE FROM THE STRING
+#-------------------------------------------------------------------
+def getNumericValue(string):
+    match = re.search(r"(\d+)", string)
+    if match:
+       return int(match.group(1))
+    else:
+       raise ValueError("No numeric part found in the value.")
+#-------------------------------------------------------------------
+#GET THE OUTPUT OF A COMMAND EXECUTED
+#-------------------------------------------------------------------
+def rdkservice_getRequiredLog(ssh_method,credentials,command):
+    output = ""
+    credentials_list = credentials.split(',')
+    host_name = credentials_list[0]
+    user_name = credentials_list[1]
+    password = credentials_list[2]
+    lib = importlib.import_module("SSHUtility")
+    if ssh_method == "directSSH":
+        method = "ssh_and_execute"
+    else:
+        method = "ssh_and_execute_" + ssh_method
+    method_to_call = getattr(lib, method)
+    try:
+        if ssh_method == "directSSH":
+            output = method_to_call(ssh_method,host_name,user_name,password,command)
+        else:
+            output = method_to_call(host_name,user_name,password,command)
+    except Exception as e:
+        print("Exception occured during ssh session")
+        print(e)
+    finally:
+        if output == "":
+            output = "EXCEPTION"
+        return output
+
+#-------------------------------------------------------------------
+#GET THE SSH DETAILS FROM CONFIGURATION FILE
+#-------------------------------------------------------------------
+def rdkservice_getSSHParams(realpath,deviceIP):
+    ssh_dict = {}
+    print("\n getting ssh params from conf file")
+    conf_file,result = getConfigFileName(realpath)
+    if result == "SUCCESS":
+        result,ssh_method = getDeviceConfigKeyValue(conf_file,"SSH_METHOD")
+        result,user_name = getDeviceConfigKeyValue(conf_file,"SSH_USERNAME")
+        result,password = getDeviceConfigKeyValue(conf_file,"SSH_PASSWORD")
+        if any(value == "" for value in (ssh_method,user_name,password)):
+            print("please configure values before test")
+            ssh_dict = {}
+        else:
+            ssh_dict["ssh_method"] = ssh_method
+            if password.upper() == "NONE":
+                password = ""
+            ssh_dict["credentials"] = deviceIP +","+ user_name +","+ password
+    else:
+        print("Failed to find the device specific config file")
+    ssh_dict = json.dumps(ssh_dict)
+    return ssh_dict
+
+#-------------------------------------------------------------------
+#SUSPEND A GIVEN PLUGIN USING RDKSHELL
+#-------------------------------------------------------------------
+def suspend_plugin(obj,plugin):
+    status = expectedResult = "SUCCESS"
+    print("\n Suspending {} \n".format(plugin))
+    params = '{"callsign":"'+plugin+'"}'
+    tdkTestObj = obj.createTestStep('rdkservice_setValue')
+    tdkTestObj.addParameter("method","org.rdk.RDKShell.1.suspend")
+    tdkTestObj.addParameter("value",params)
+    start_suspend = str(datetime.utcnow()).split()[1]
+    tdkTestObj.executeTestCase(expectedResult);
+    result = tdkTestObj.getResult();
+    if result == "SUCCESS":
+        print("\n Suspended {} plugin \n".format(plugin))
+        tdkTestObj.setResultStatus("SUCCESS")
+    else:
+        print("\n Unable to Suspend {} plugin \n".format(plugin))
+        tdkTestObj.setResultStatus("FAILURE")
+        status = "FAILURE"
+    return status,start_suspend
+#-------------------------------------------------------------------
+#RESTORE A GIVEN PLUGIN USING RDKSHELL
+#-------------------------------------------------------------------
+def restore_plugin(obj,plugin):
+    status = expectedResult = "SUCCESS"
+    print("\n Restoring {} \n".format(plugin))
+    params = '{"callsign":"'+plugin+'"}'
+    tdkTestObj = obj.createTestStep('rdkservice_setValue')
+    tdkTestObj.addParameter("method","org.rdk.RDKShell.restore")
+    tdkTestObj.addParameter("value",params)
+    start_restore = str(datetime.utcnow()).split()[1]
+    tdkTestObj.executeTestCase(expectedResult);
+    result = tdkTestObj.getResult();
+    if result == "SUCCESS":
+        print("\n Restored {} plugin \n".format(plugin))
+        tdkTestObj.setResultStatus("SUCCESS")
+    else:
+        print("\n Unable to Restore {} plugin \n".format(plugin))
+        tdkTestObj.setResultStatus("FAILURE")
+        status = "FAILURE"
+    return status,start_restore
+#-------------------------------------------------------------------
+#LAUNCH A GIVEN PLUGIN USING RDKSHELL
+#-------------------------------------------------------------------
+def launch_plugin(obj,plugin,uri=''):
+    status = expectedResult = "SUCCESS"
+    start_launch = ""
+    rdkshell_activated = check_status_of_rdkshell()
+    if rdkshell_activated:
+        print("\n Resuming {} \n".format(plugin))
+        params = '{"callsign":"'+plugin+'", "type":"", "uri":"' + uri + '"}'
+        tdkTestObj = obj.createTestStep('rdkservice_setValue')
+        tdkTestObj.addParameter("method","org.rdk.RDKShell.1.launch")
+        tdkTestObj.addParameter("value",params)
+        start_launch = str(datetime.utcnow()).split()[1]
+        tdkTestObj.executeTestCase(expectedResult);
+        result = tdkTestObj.getResult();
+        if result == "SUCCESS":
+            print("\n Resumed {} plugin \n".format(plugin))
+            tdkTestObj.setResultStatus("SUCCESS")
+        else:
+            print("\n Unable to Resume {} plugin \n".format(plugin))
+            tdkTestObj.setResultStatus("FAILURE")
+            status = "FAILURE"
+    else:
+        status = "FAILURE"
+    return status,start_launch
+
+#-------------------------------------------------------------------
+#GET BLUETOOTH MAC OF DUT
+#-------------------------------------------------------------------
+def rdkservice_getBluetoothMac():
+    method = "org.rdk.System.1.getDeviceInfo"
+    reqValue = "bluetooth_mac"
+    data = '"method": "'+method+'","params":{"params":"'+reqValue+'"}'
+    result = execute_step(data)
+    if result != "EXCEPTION OCCURRED":
+        value = result[reqValue]
+        return value
+    else:
+        return result
+
+#-------------------------------------------------------------------
+#GET SUPPORTED PLUGINS FROM DEVICE CONFIG FILE
+#-------------------------------------------------------------------
+def rdkservice_getSupportedPlugins(realpath,plugins):
+    conf_file,result = getConfigFileName(realpath)
+    if result == "SUCCESS":
+        status,supported_plugins = getDeviceConfigKeyValue(conf_file,"SUPPORTED_PLUGINS")
+        if supported_plugins != "":
+            plugins_list = plugins.split(',')
+            supported_plugins_list = supported_plugins.split(',')
+            if not all(plugin in supported_plugins_list for plugin in plugins_list):
+                updated_plugins_list = [plugin for plugin in plugins_list if plugin in supported_plugins_list]
+                plugins = ','.join(plugin for plugin in updated_plugins_list)
+        else:
+            print("\n Please configure the supported plugins in device configuration file \n")
+            plugins = "FAILURE"
+        return plugins
+    else:
+        return result
+
+#-------------------------------------------------------------------
+#VALIDATE VIDEO PLAYBACK IN PREMIUM APPS
+#-------------------------------------------------------------------
+def rdkservice_validateVideoPlayback(sshmethod,credentials,video_validation_script):
+    result = "SUCCESS"
+    video_validation_script = video_validation_script.split('.py')[0]
+    try:
+        lib = importlib.import_module(video_validation_script)
+        method = "check_video_status"
+        method_to_call = getattr(lib, method)
+        result = method_to_call(sshmethod,credentials)
+    except Exception as e:
+        print("\n ERROR OCCURRED WHILE IMPORTING THE VIDEO VALIDATION SCRIPT FILE, PLEASE CHECK THE CONFIGURATION \n")
+        result = "FAILURE"
+    finally:
+        return result
+
+#-------------------------------------------------------------------
+#VALIDATE PLUGIN FUNCTIONALITY
+#The function will launch the plugin and validate the functionality
+#of the plugin. eg: launch Cobalt, set video URL and validate video
+#playback
+#-------------------------------------------------------------------
+def rdkservice_validatePluginFunctionality(plugin,operations,validation_details):
+    result = "FAILURE"
+    operations = json.loads(operations)
+    validation_details = json.loads(validation_details)
+    movedToFront = False
+    #Activate plugin
+    print("\n Activating plugin : {}".format(plugin))
+    if plugin == "ResidentApp":
+        status = rdkservice_setPluginStatus(plugin,"activate",validation_details[1])
+    else:
+        status = rdkservice_setPluginStatus(plugin,"activate")
+    time.sleep(5)
+    #Check status
+    if status != "EXCEPTION OCCURRED":
+        curr_status = rdkservice_getPluginStatus(plugin)
+        time.sleep(10)
+        if curr_status in ("activated","resumed"):
+            zorder_result = rdkservice_getValue("org.rdk.RDKShell.1.getZOrder")
+            if zorder_result != "EXCEPTION OCCURRED":
+                zorder = zorder_result["clients"]
+                if plugin.lower() in zorder:
+                    if zorder[0].lower() != plugin.lower():
+                        param = '{"client": "'+plugin+'"}'
+                        movetofront_result = rdkservice_setValue("org.rdk.RDKShell.1.moveToFront",param)
+                        if movetofront_result != "EXCEPTION OCCURRED":
+                            movedToFront = True
+                    else:
+                        movedToFront = True
+                else:
+                    print("\n {} is not present in the zorder: {}".format(plugin,zorder))
+                if movedToFront:
+                    for operation in operations:
+                        method = [plugin_method for plugin_method in operation][0]
+                        value = [operation[plugin_method] for plugin_method in operation][0]
+                        response = rdkservice_setValue(method,value)
+                        sys.stdout.flush()
+                        if response == "EXCEPTION OCCURRED":
+                            print("\n Error while executing {} method".format(method))
+                            break
+                        time.sleep(20)
+                    else:
+                        print("\n Successfully completed launching and setting the operations for {} plugin".format(plugin))
+                        validation_check = validation_details[0]
+                        if validation_check == "video_validation":
+                            time.sleep(20)
+                            sshmethod = validation_details[1]
+                            credentials = validation_details[2]
+                            video_validation_script = validation_details[3]
+                            video_status =  rdkservice_validateVideoPlayback(sshmethod,credentials,video_validation_script)
+                            sys.stdout.flush()
+                            if video_status != "SUCCESS":
+                                print("\n Video is not playing")
+                                return result
+                            else:
+                                print("\n Video is playing")
+                                result = "SUCCESS"
+                        elif validation_check == "no_validation":
+                            print("\n Validation is not needed, proceeding the test")
+                            result = "SUCCESS"
+                        else:
+                            method = validation_check
+                            expected_value = validation_details[1]
+                            value = rdkservice_getValue(method)
+                            if value not in ("EXCEPTION OCCURRED", None) and expected_value in value:
+                                print("\n The value:{} set for {} plugin".format(value,plugin))
+                                result = "SUCCESS"
+                            else:
+                                print("\n Expected Value is not present, Current value: {}".format(value))
+                                return result
+                else:
+                    print("\n Error while moving {} plugin to front ".format(plugin))
+            else:
+                print("\n Error while getting the zorder result")
+        else:
+            print("\n Plugin is not activated, current status: {}".format(curr_status))
+    else:
+        print("\n Error while activating the plugin")
+    return result
+
+#-------------------------------------------------------------------
+#VALIDATE IPV4 ADDRESS
+#-------------------------------------------------------------------
+def is_valid_ipv4_address(address):
+    try:
+        socket.inet_pton(socket.AF_INET, address)
+    except AttributeError:  # no inet_pton available
+        try:
+            socket.inet_aton(address)
+        except socket.error:
+            return False
+        return address.count('.') == 3
+    except socket.error:  # not a valid address
+        return False
+    return True
+
+#-------------------------------------------------------------------
+#VALIDATE IPV6 ADDRESS
+#-------------------------------------------------------------------
+def is_valid_ipv6_address(address):
+    try:
+        socket.inet_pton(socket.AF_INET6, address)
+    except socket.error:  # not a valid address
+        return False
+    return True
+
+#-------------------------------------------------------------------
+#GET DEVICE UPTIME
+#-------------------------------------------------------------------
+def get_device_uptime(obj):
+    uptime = -1
+    expectedResult = 'SUCCESS'
+    device_info = 'DeviceInfo'
+    tdkTestObj = obj.createTestStep('rdkservice_setPluginStatus')
+    tdkTestObj.addParameter('plugin',device_info)
+    tdkTestObj.addParameter("status",'activate')
+    tdkTestObj.executeTestCase(expectedResult)
+    result = tdkTestObj.getResult()
+    if expectedResult in result:
+        tdkTestObj.setResultStatus("SUCCESS")
+        time.sleep(5)
+        tdkTestObj = obj.createTestStep('rdkservice_getPluginStatus')
+        tdkTestObj.addParameter('plugin',device_info)
+        tdkTestObj.executeTestCase(expectedResult)
+        result = tdkTestObj.getResult()
+        device_info_status = tdkTestObj.getResultDetails()
+        if device_info_status in 'activated':
+            tdkTestObj.setResultStatus("SUCCESS")
+            time.sleep(5)
+            tdkTestObj = obj.createTestStep('rdkservice_getReqValueFromResult')
+            tdkTestObj.addParameter("method","DeviceInfo.1.systeminfo")
+            tdkTestObj.addParameter("reqValue","uptime")
+            tdkTestObj.executeTestCase(expectedResult);
+            result = tdkTestObj.getResult()
+            if expectedResult in result:
+                uptime = int(tdkTestObj.getResultDetails())
+                tdkTestObj.setResultStatus("SUCCESS")
+            else:
+                print('\n Error while executing DeviceInfo.1.systeminfo method')
+                tdkTestObj.setResultStatus("FAILURE")
+        else:
+            print('\n Unable to activate DeviceInfo plugin, current status: ',device_info_status)
+            tdkTestObj.setResultStatus("FAILURE")
+    else:
+        print('\n Error while activating DeviceInfo')
+        tdkTestObj.setResultStatus("FAILURE")
+    return uptime
+
+#-------------------------------------------------------------------
+#MOVE THE PLUGIN TO FRONT OR BACK BASED ON ARGUMENTS
+#-------------------------------------------------------------------
+def move_plugin(obj,plugin,method):
+    result_val = "FAILURE"
+    expectedResult = "SUCCESS"
+    param_val = '{"client": "'+plugin+'"}'
+    tdkTestObj = obj.createTestStep('rdkservice_setValue')
+    tdkTestObj.addParameter("method","org.rdk.RDKShell.1."+method)
+    tdkTestObj.addParameter("value",param_val)
+    tdkTestObj.executeTestCase(expectedResult)
+    result = tdkTestObj.getResult()
+    if expectedResult in result:
+        tdkTestObj.setResultStatus("SUCCESS")
+        print("\n Check whether {} is in front".format(plugin))
+        time.sleep(5)
+        tdkTestObj = obj.createTestStep('rdkservice_getValue')
+        tdkTestObj.addParameter("method","org.rdk.RDKShell.1.getZOrder")
+        tdkTestObj.executeTestCase(expectedResult)
+        zorder = tdkTestObj.getResultDetails()
+        zorder_status = tdkTestObj.getResult()
+        if expectedResult in zorder_status :
+            zorder = ast.literal_eval(zorder)["clients"]
+            print("zorder: ",zorder)
+            if  plugin.lower() in zorder and plugin.lower() == zorder[0]:
+                result_val = "SUCCESS"
+                print("\n {} is in front".format(plugin))
+                tdkTestObj.setResultStatus("SUCCESS")
+            else:
+                print("\n {} is not in front".format(plugin))
+                tdkTestObj.setResultStatus("FAILURE")
+        else:
+            print("\n Unable to get zorder")
+            tdkTestObj.setResultStatus("FAILURE")
+    else:
+        print("\n Error while executing {} method".format(method))
+        tdkTestObj.setResultStatus("FAILURE")
+    return result_val
+
+#-------------------------------------------------------------------------
+#Utility functions for Hardware Performance threshold validation - START
+#-------------------------------------------------------------------------
+def hardwarePerformanceThresholdComparison(sysUtilObj,message,unit,reverserscheck="false"):
+    status=[]
+    threshold_Check=thresholdCheck(sysUtilObj)
+    if threshold_Check=="TRUE":
+        print("***************************User Enabled Threshold check*********************************************")
+
+        transferLogDetails=json.loads(message)
+        configParam=transferLogDetails["utility"].upper()
+        thresholdValueDevice=transferLogDetails["values"]
+        conf_file,result=getConfigFileNameDetail(sysUtilObj)
+        result,thresholdLimitConfig=getDeviceConfigValue(conf_file,configParam)
+        thresholdValueConfig=json.loads(thresholdLimitConfig)
+
+        for(key1,Value1),(key2,Value2) in zip(list(thresholdValueDevice.items()),list(thresholdValueConfig.items())):
+            hw_Device_pname=key1
+            hw_Config_pname=key2
+
+            hw_Device_Value=float(Value1.split(" ")[0])
+            hw_Config_value=float(Value2.split(" ")[0])
+            if hw_Device_Value >= hw_Config_value if reverserscheck == "false" else hw_Device_Value <= hw_Config_value :
+                status.append("SUCCESS")
+                print("Success :Device performance value {0}{2} is in the expected threshold value {1}{2}".format(hw_Device_Value,hw_Config_value,unit))
+            else:
+                status.append("FAILURE")
+                print("FAILURE :Device performance value {0}{2} is not in the expected threshold value {1}{2}".format(hw_Device_Value,hw_Config_value,unit))
+        return "FAILURE" if "FAILURE" in status else "SUCCESS"
+
+    else:
+        print("*********************************User Disable  Threshold check**********************************")
+        status="SUCCESS"
+        return status
+
+#--------------------------------------------------------------------------
+#   Check ThresholdCheck User Input from Config File
+#--------------------------------------------------------------------------
+def thresholdCheck(Obj):
+    configParam="Threshold_Check"
+    conf_file=getConfigFileNameDetail(Obj)
+    Threshold_Check_UserInput=getDeviceConfigValue(conf_file,configParam)
+    status ,Threshold_Check_UserInput=getDeviceConfigValue(conf_file,configParam)
+    return Threshold_Check_UserInput
+#-------------------------------------------------------------------------
+#   Get Avg Threshold Config Value
+#-------------------------------------------------------------------------
+def getDeviceConfigValue(conf_file,configParam):
+    value=""
+    status="SUCCESS"
+    deviceConfig="device.config"
+    config=configparser.ConfigParser()
+    config.read(conf_file)
+    value=str(config.get(deviceConfig,configParam))
+    return status,value
+#-----------------------------------------------------------------------
+# Get Config File Details for Threshold Comparison
+#-----------------------------------------------------------------------
+def getConfigFileNameDetail(obj):
+    url = obj.url + '/deviceGroup/getDeviceDetails?deviceIp='+obj.IP
+    try:
+        data = urllib.request.urlopen(url).read()
+        deviceDetails = json.loads(data)
+        device_Name = deviceDetails["devicename"]
+        device_Type = deviceDetails["boxtype"]
+        deviceConfigFile=""
+        status ="SUCCESS"
+        configPath = os.path.join(
+            os.path.normpath(obj.realpath), "fileStore", "tdkvRDKServiceConfig"
+        )
+        deviceNameConfigFile = configPath + "/" + device_Name + ".config"
+        deviceTypeConfigFile = configPath + "/" + device_Type + ".config"
+        # Check whether device / platform config files required for
+        # executing the test are present
+        if os.path.exists(deviceNameConfigFile) == True:
+            deviceConfigFile = deviceNameConfigFile
+            log_device_config_file(deviceNameConfigFile)
+        elif os.path.exists(deviceTypeConfigFile) == True:
+            deviceConfigFile = deviceTypeConfigFile
+            log_device_config_file(deviceTypeConfigFile)
+        else:
+            status = "FAILURE"
+            print("[ERROR]: No Device config file found : %s or %s" %(deviceNameConfigFile,deviceTypeConfigFile))
+    except:
+        print("Unable to get Device Details from REST !!!")
+        status = "FAILURE"
+    return deviceConfigFile,status;
+
+#-------------------------------------------------------------------------
+#Utility functions for Hardware Performance threshold validation - END
+#-------------------------------------------------------------------------
+
+#-------------------------------------------------------------------
+#CHECK THE STATUS OF RDKSHELL PLUGIN AND ACTIVATE IF NEEDED
+#-------------------------------------------------------------------
+def check_status_of_rdkshell():
+    activated = False
+    rdkshell_status = rdkservice_getPluginStatus("org.rdk.RDKShell")
+    if "activated" == rdkshell_status:
+        activated = True
+    elif "deactivated" == rdkshell_status:
+        set_status = rdkservice_setPluginStatus("org.rdk.RDKShell","activate")
+        time.sleep(2)
+        rdkshell_status = rdkservice_getPluginStatus("org.rdk.RDKShell")
+        if "activated" in rdkshell_status:
+            activated = True
+        else:
+            print("\n Unable to activate RDKShell plugin")
+    else:
+        print("\n RDKShell status in DUT:",rdkshell_status)
+    return activated
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM ANIMATION BENCHMARK TEST
+#-------------------------------------------------------------------
+def rdkservice_getBrowserScore_AnimationBenchmark():
+    fps_list = []
+    try:
+        browser_score_dict = {}
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port("com.rdkcentral.animation")
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(20)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[2]/span/span/span')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(20)
+            for count in range(0,5):
+                try:
+                    fps_info_element = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/li[2]/span/span[2]')
+                    fps_info = fps_info_element.text  # Now we get the text after locating the element again
+                except StaleElementReferenceException:
+                    print("Stale element encountered, retrying...")
+                    fps_info_element = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/li[2]/span/span[2]')
+                    fps_info = fps_info_element.text  # Re-find the element before using `.text`
+
+                if "FPS" in fps_info:
+                    fps_value = fps_info.split(' ')[0]
+                    fps_list.append(float(fps_value))
+                    time.sleep(1)
+                else:
+                    print("\n Error while getting FPS value")
+                    browser_score_dict["main_score"] = "Unable to get the browser score"
+                    break
+            else:
+                average_fps = sum(fps_list)/len(fps_list)
+                browser_score_dict["main_score"] = round(average_fps,2)
+        else:
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict
+
+#-------------------------------------------------------------------
+#GET THE GRAPHICAL PLUGINS SUPPORTED BY THE DUT
+#-------------------------------------------------------------------
+def get_graphical_plugins(conf_file):
+    status,graphical_plugins = getDeviceConfigKeyValue(conf_file,"AVAILABLE_GRAPHICAL_PLUGINS")
+    if graphical_plugins != "":
+        plugins_list = graphical_plugins.split(',')
+    else:
+        print("\n Please configure the available graphical plugins in device config file")
+        plugins_list = []
+    return plugins_list
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM SPEEDOMETER TEST
+#-------------------------------------------------------------------
+
+def rdkservice_getBrowserScore_Speedometer():
+    try:
+        browser_score_dict = {}
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port("com.rdkcentral.speedometer")
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[2]/span/span/span[1]')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(20)
+            speedometer_score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[4]/li[4]/span/span[2]').text
+            browser_score_dict["main_score"] = speedometer_score
+        else:
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM MOTIONMARK TEST
+#-------------------------------------------------------------------
+def rdkservice_getBrowserScore_MotionMark():
+    try:
+        browser_score_dict = {}
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port("com.rdkcentral.motion")
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[3]/span/span/span')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(10)
+            motionmark_score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[2]/ol[2]/ol[1]/li[1]/span/span[2]').text
+            browser_score_dict["main_score"] = motionmark_score
+            for i in range(2,10):
+                sub_category = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[2]/ol[2]/ol[2]/ol[2]/ol[2]/ol['+str(i)+']/li[1]/span/span[2]').text
+                score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol/ol[2]/ol[2]/ol[2]/ol[1]/ol[1]/ol[2]/ol['+str(i)+']/li[1]/span/span[2]').text
+                print(sub_category + '  :  ' + score)
+            print('\n')
+            time.sleep(5)
+            driver.quit()
+        else:
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM SMASHCAT TEST
+#-------------------------------------------------------------------
+def rdkservice_getBrowserScore_Smashcat():
+    try:
+        browser_score_dict = {}
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port()
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[2]/span/span/span')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(20)
+            smashcat_score_list = []
+            count = 1
+            while (count<3):
+                try:
+                    smashcat_score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol[2]/ol[1]/ol[1]/li[1]').text
+                except exceptions.StaleElementReferenceException as e:
+                    smashcat_score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol[2]/ol[1]/ol[1]/li[1]').text
+                smashcat_score = int(smashcat_score.split('f')[1].split('>')[1])
+                print("score =",smashcat_score)
+                time.sleep(2)
+                smashcat_score_list.append(smashcat_score)
+                count = count +1
+            smashcat_score =(sum(smashcat_score_list))/2
+            browser_score_dict["main_score"] = smashcat_score
+            driver.quit()
+        else:
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict
+
+#-------------------------------------------------------------------
+#GET THE BROWSER SCORE FROM KRAKEN TEST
+#-------------------------------------------------------------------
+
+def rdkservice_getBrowserScore_Kraken():
+    try:
+        browser_score_dict = {}
+        # Get webinspect port with error handling
+        try:
+            webinspect_port = get_webinspect_port("com.rdkcentral.kraken")
+            print("\nWebinspect port retrieved: ", webinspect_port)
+        except Exception as e:
+            print("\nFailed to retrieve webinspect port:", e)
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+            browser_score_dict = json.dumps(browser_score_dict)
+            return browser_score_dict
+        
+        webinspectURL = 'http://'+deviceIP+':'+webinspect_port+'/Main.html?ws='+deviceIP+':'+webinspect_port+'/socket/1/1/WebPage'
+        print("\nWebinspect URL:", webinspectURL)
+        
+        # Test basic connectivity before opening browser
+        try:
+            print("\nTesting connection to webinspect server...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((deviceIP, int(webinspect_port)))
+            sock.close()
+            if result == 0:
+                print("Connection to webinspect server successful")
+            else:
+                print("Connection to webinspect server failed (code: %d)" % result)
+        except Exception as e:
+            print("Connection test error:", e)
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            html = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/li[2]/span/span/span')
+            source = action.move_to_element(html).move_by_offset(-30,0).click().key_down(Keys.ALT).click().perform()
+            time.sleep(20)
+            kraken_score = driver.find_element_by_xpath('//*[@id="tab-browser"]/div/div/div/div[2]/div/ol/ol/ol/ol[1]/ol/ol[4]/li[8]/span/span').text
+            kraken_score = kraken_score.split("Total: ")[1]
+            browser_score_dict["main_score"] = kraken_score.split('ms')[0].strip()
+            driver.quit()
+        else:
+            browser_score_dict["main_score"] = "Unable to get the browser score"
+    except Exception as error:
+        print("Got exception while getting the browser score")
+        print(error)
+        browser_score_dict["main_score"] = "Unable to get the browser score"
+        driver.quit()
+    browser_score_dict = json.dumps(browser_score_dict)
+    return browser_score_dict
+#--------------------------------------------------------
+# OPEN A LOG FILE TO REDIRECT THE LOGS
+#--------------------------------------------------------
+def open_write_logfile(obj,filename,script_name,data=""):
+    new_path = "../TDK_PVS_DATA/"
+    os.makedirs(os.path.dirname(obj.realpath+new_path), exist_ok=True)
+    output_file = '{}{}.txt'.format(obj.realpath+new_path,filename)
+    if os.path.isfile(output_file):
+        with open(output_file, 'r') as the_file:
+            buf = the_file.readlines()
+        with open(output_file, 'w') as the_file:
+            for line in buf:
+                if script_name in line :
+                    if data.split(" ::: ")[1] == line.split(" ::: ")[1]:
+                        data = line.strip() + " ::: " + data.split(" ::: ")[-1]
+                    else:
+                        the_file.write(line)
+                else:
+                    the_file.write(line)
+
+    print("\nWriting performance data to file ", output_file)
+    with open(output_file, 'a+') as out_file:
+        out_file.write(data)
+#--------------------------------------------------------------
+#GET PVS DATA AND WRITE TO LOG FILE
+#--------------------------------------------------------------
+def getDataAndWriteInFile(Value,obj):
+    #getImageName
+    ImageName = rdkservice_getValueWithParams("org.rdk.System.1.getDeviceInfo",'["imageVersion"]')
+    filename = ImageName["imageVersion"]
+    delimiter = " ::: "
+    #open_write_logfile(libObj,filename,obj.execName)
+    count1 = sum(1 for d in Value if 'THRESHOLD_VALUE' in d)
+    count2 = sum(1 for d in Value if 'Threshold value' in d)
+    count = count1 + count2
+    for i in range (count):
+        data = obj.execName + delimiter
+        for item in Value:
+            if "THRESHOLD_VALUE" in item or "Threshold value" in item:
+                threshold_value = item.split(":")[1]
+                Value.remove(item)
+                break;
+        for item in Value:
+            if "Time taken " in item or "Browser " in item:
+                data = data + item.split(":")[0] + delimiter + threshold_value + delimiter
+                data = data + item.split(":")[1]
+                Value.remove(item)
+                break;
+        data = data + "\n"
+        print(data)
+        open_write_logfile(libObj,filename,obj.execName,data)
+
+#---------------------------------------------------------------------------------------
+# To handle the format change in output from wpelogs
+#---------------------------------------------------------------------------------------
+def parse_value_to_float(raw_value):
+    try:
+        return float(raw_value.strip())
+    except ValueError:
+        pass
+    formatted_result = (raw_value.lower().replace('milliseconds', '').replace('ms', '').strip())
+    try:
+        return float(formatted_result)
+    except ValueError:
+        raise ValueError(f"Cannot convert value to float: '{raw_value}'")
+
+#---------------------------------------------------------------------------------------
+# PVS Execution Summary
+#---------------------------------------------------------------------------------------
+def getSummary(Summ_list,obj = False):
+    if obj != False:
+        if obj.isStandAlone:
+            tdkStandAlonelib.closePendingStep(obj)
+        Value = [x for x in Summ_list]
+        getDataAndWriteInFile(Value,obj)
+
+    if Summ_list != []:
+        print("############## Execution Summary #######################")
+        for key in Summ_list:
+            print(key)
+            value = key.split(':')[1]
+            if not re.match(r'^-?\d+(\.\d+)?', value.strip()):
+                continue
+            try:
+                numeric_value = parse_value_to_float(value)
+                if numeric_value < 0:
+                    print("Check if VM and DUT time is synchronized OR Check if any previous steps got failed.")
+            except ValueError as e:
+                print(e)
+
+#Function to test using RESTAPI
+def testusingRestAPI(obj):
+    app_log_file = obj.logpath+"/"+str(obj.execID)+"/"+str(obj.execID)+"_"+str(obj.execDevId)+"_"+str(obj.resultId)+"_mvs_applog.txt"
+    continue_count = 0
+    file_check_count = 0
+    logging_flag = 0
+    hang_detected = 0
+    test_result = ""
+    expected_play_evt = ""
+    observed_play_evt = ""
+    expected_pause_evt = ""
+    observed_pause_evt = ""
+    lastLine = None
+    lastIndex = 0
+    while True:
+        if file_check_count > 60:
+            print("\nREST API Logging is not happening properly. Exiting...")
+            break;
+        if os.path.exists(app_log_file):
+            logging_flag = 1
+            break;
+        else:
+            file_check_count += 1
+            time.sleep(1);
+    while logging_flag:
+        if continue_count > 60:
+            hang_detected = 1
+            print("\nApp not proceeding for 60 secs. Exiting...")
+            break;
+        with open(app_log_file,'r') as f:
+            lines = f.readlines()
+        if lines:
+            if len(lines) != lastIndex:
+                continue_count = 0
+                #print(lastIndex,len(lines))
+                for i in range(lastIndex,len(lines)):
+                    print(lines[i])
+                    if "Expected Event: paused" in lines[i]:
+                        expected_pause_evt = lines[i]
+                    elif "Observed Event: paused" in lines[i]:
+                        observed_pause_evt = lines[i+1]
+                    elif "Expected Event: play" in lines[i]:
+                        expected_play_evt = lines[i]
+                    elif "Observed Event: play" in lines[i]:
+                        observed_play_evt = lines[i+1]
+                    elif "TEST RESULT:" in lines[i]:
+                        test_result = lines[i]
+                lastIndex = len(lines)
+                if test_result != "":
+                    break;
+            else:
+                continue_count += 1
+        else:
+            continue_count += 1
+        time.sleep(1)
+    return expected_pause_evt,observed_pause_evt,expected_play_evt,observed_play_evt,test_result
+
+#Function to test using WebInspect
+def testusingWebInspect(obj,webkit_console_socket):
+    time.sleep(60)
+    continue_count = 0
+    test_result = ""
+    expected_play_evt = ""
+    observed_play_evt = ""
+    expected_pause_evt = ""
+    observed_pause_evt = ""
+    while True:
+        if continue_count > 60:
+            print("\n Application is not playing the content")
+            break
+        if (len(webkit_console_socket.getEventsBuffer())== 0):
+            time.sleep(1)
+            continue_count += 1
+            continue
+        continue_count = 0
+        console_log = webkit_console_socket.getEventsBuffer().pop(0)
+        dispConsoleLog(console_log)
+        if "Expected Event: paused" in console_log:
+            expected_pause_evt = getConsoleMessage(console_log)
+        elif "Observed Event: paused" in console_log:
+            observed_pause_evt = getConsoleMessage(console_log)
+        elif "Expected Event: play" in console_log:
+            expected_play_evt = getConsoleMessage(console_log)
+        elif "Observed Event: play" in console_log:
+            observed_play_evt = getConsoleMessage(console_log)
+        elif "TEST RESULT:" in console_log or "Connection refused" in console_log:
+            test_result = getConsoleMessage(console_log)
+            break;
+        else:
+            continue
+    webkit_console_socket.disconnect()
+    time.sleep(5)
+    return expected_pause_evt,observed_pause_evt,expected_play_evt,observed_play_evt,test_result
+
+#---------------------------------------------------------------
+#COMMON PERFORMANCE TEST UTILITY FUNCTIONS
+#---------------------------------------------------------------
+
+#---------------------------------------------------------------
+#VALIDATE TIME AGAINST THRESHOLD WITH OFFSET
+#---------------------------------------------------------------
+def validate_time_with_threshold(time_taken, conf_file, threshold_key, offset_key="THRESHOLD_OFFSET"):
+    """
+    Common function to validate time taken against threshold + offset
+    Returns: (is_valid, threshold_value, offset_value)
+    """
+    config_status, threshold_value = getDeviceConfigKeyValue(conf_file, threshold_key)
+    offset_status, offset_value = getDeviceConfigKeyValue(conf_file, offset_key)
+    
+    if all(value != "" for value in (threshold_value, offset_value)):
+        max_allowed_time = int(threshold_value) + int(offset_value)
+        is_valid = 0 < time_taken < max_allowed_time
+        return is_valid, threshold_value, offset_value
+    else:
+        print(f"\n Please configure {threshold_key} and {offset_key} in device configuration file \n")
+        return False, "", ""
+
+#---------------------------------------------------------------
+#MEASURE APP LAUNCH TIME USING LIFECYCLE EVENTS
+#---------------------------------------------------------------
+def measure_app_launch_time(app_id, launch_start_time, event_listener, timeout=120):
+    """
+    Common function to measure app launch time using lifecycle events
+    Returns: (success, launched_time, launch_time_ms)
+    """
+    continue_count = 0
+    launched_time = ""
+    app_active = False
+    
+    while continue_count < timeout:
+        if len(event_listener.getEventsBuffer()) == 0:
+            continue_count += 1
+            time.sleep(1)
+            continue
+            
+        event_log = event_listener.getEventsBuffer().pop(0)
+        print("\n Lifecycle Event Received: ", event_log, "\n")
+        
+        if app_id in str(event_log) and "onAppLifecycleStateChanged" in str(event_log):
+            try:
+                event_parts = str(event_log).split('$$$')
+                if len(event_parts) > 1:
+                    event_timestamp = event_parts[0]
+                    event_data_str = event_parts[1]
+                    event_data = json.loads(event_data_str)
+                    
+                    if "params" in event_data:
+                        params = event_data["params"]
+                        app_id_from_event = params.get("appId", "")
+                        new_state = params.get("newLifecycleState", "")
+                        
+                        if app_id_from_event == app_id and new_state == "ACTIVE":
+                            launched_time = event_timestamp
+                            app_active = True
+                            break
+            except Exception as e:
+                print(f"Error parsing event: {e}")
+                continue
+        continue_count += 1
+    
+    if app_active and launched_time:
+        launch_start_time_ms = getTimeInMilliSec(launch_start_time)
+        launched_time_ms = getTimeInMilliSec(launched_time)
+        time_taken = launched_time_ms - launch_start_time_ms
+        return True, launched_time, time_taken
+    else:
+        return False, "", 0
+
+#---------------------------------------------------------------
+#GET THRESHOLD AND OFFSET VALUES FROM CONFIG
+#---------------------------------------------------------------
+def get_threshold_values(conf_file, threshold_key, offset_key="THRESHOLD_OFFSET"):
+    """
+    Common function to get threshold and offset values from config
+    Returns: (status, threshold_value, offset_value)
+    """
+    config_status, threshold_value = getDeviceConfigKeyValue(conf_file, threshold_key)
+    offset_status, offset_value = getDeviceConfigKeyValue(conf_file, offset_key) 
+    
+    if all(value != "" for value in (threshold_value, offset_value)):
+        return "SUCCESS", threshold_value, offset_value
+    else:
+        return "FAILURE", "", ""
+
+#---------------------------------------------------------------
+#DOWNLOAD, INSTALL AND LAUNCH APP WITH PERFORMANCE MEASUREMENT
+#---------------------------------------------------------------
+#DOWNLOAD APP USING DOWNLOAD MANAGER
+#---------------------------------------------------------------
+def rdkv_download_app(event_listener, app_download_url, app_id, download_timeout=120):
+    """
+    Download an app using Download Manager
+    Returns: (status, download_time_ms)
+    """
+    try:
+        print(f"\n Starting app download for {app_id}... \n")
+        download_start_time = str(datetime.utcnow()).split()[1]
+
+        download_params = '{"url":"' + app_download_url + '", "appId":"' + app_id + '"}'
+        result = rdkservice_setValue("org.rdk.DownloadManager.1.download", download_params)
+        
+        if result == "EXCEPTION OCCURRED":
+            print(f"\n Error while initiating app download for {app_id} \n")
+            return "FAILURE", 0
+
+        print(f"\n App download initiated successfully for {app_id} \n")
+
+        # Wait for download completion using events
+        download_success = False
+        download_count = 0
+        download_time_ms = 0
+
+        while download_count < download_timeout:
+            if len(event_listener.getEventsBuffer()) == 0:
+                download_count += 1
+                time.sleep(1)
+                continue
+
+            event_log = event_listener.getEventsBuffer().pop(0)
+            
+            if app_id in str(event_log) and "onAppDownloadStatus" in str(event_log):
+                try:
+                    event_parts = str(event_log).split('$$$')
+                    if len(event_parts) > 1:
+                        event_data_str = event_parts[1]
+                        event_data = json.loads(event_data_str)
+
+                        if "params" in event_data:
+                            params = event_data["params"]
+                            download_id = params.get("downloadId", "")
+                            file_locator = params.get("fileLocator", "")
+                            fail_reason = params.get("failReason", "")
+
+                            if app_id in str(download_id) or app_id in str(file_locator):
+                                if fail_reason == "" or fail_reason is None:
+                                    download_success = True
+                                    download_end_time = str(datetime.utcnow()).split()[1]
+                                    download_time_ms = getTimeInMilliSec(download_end_time) - getTimeInMilliSec(download_start_time)
+                                    print(f"\n App download completed successfully in {download_time_ms}ms \n")
+                                else:
+                                    print(f"\n App download failed with reason: {fail_reason} \n")
+                                break
+                except Exception as e:
+                    print(f"Error parsing download event: {e}")
+                    continue
+            download_count += 1
+
+        if download_success:
+            return "SUCCESS", download_time_ms
+        else:
+            print(f"\n Download did not complete within timeout period ({download_timeout} seconds) \n")
+            return "FAILURE", 0
+
+    except Exception as e:
+        print(f"\n Exception occurred during app download: {e} \n")
+        return "FAILURE", 0
+
+#---------------------------------------------------------------
+#INSTALL APP USING PACKAGE MANAGER
+#---------------------------------------------------------------
+def rdkv_install_app(event_listener, app_id, install_timeout=120):
+    """
+    Install an app using Package Manager
+    Returns: (status, install_time_ms, app_instance_id)
+    """
+    try:
+        print(f"\n Starting app installation for {app_id}... \n")
+        install_start_time = str(datetime.utcnow()).split()[1]
+
+        install_params = '{"appId":"' + app_id + '"}'
+        result = rdkservice_setValue("org.rdk.AppPackageManager.1.install", install_params)
+
+        if result == "EXCEPTION OCCURRED":
+            print(f"\n Error while initiating app installation for {app_id} \n")
+            return "FAILURE", 0, ""
+
+        print(f"\n App installation initiated successfully for {app_id} \n")
+
+        # Wait for installation completion using onAppInstalled event
+        install_success = False
+        install_count = 0
+        app_instance_id = ""
+        install_time_ms = 0
+
+        while install_count < install_timeout:
+            if len(event_listener.getEventsBuffer()) == 0:
+                install_count += 1
+                time.sleep(1)
+                continue
+
+            event_log = event_listener.getEventsBuffer().pop(0)
+
+            if app_id in str(event_log) and "onAppInstalled" in str(event_log):
+                try:
+                    event_parts = str(event_log).split('$$$')
+                    if len(event_parts) > 1:
+                        event_data_str = event_parts[1]
+                        event_data = json.loads(event_data_str)
+
+                        if "params" in event_data:
+                            params = event_data["params"]
+                            installed_app_id = params.get("appId", "")
+                            app_instance_id = params.get("appInstanceId", "")
+
+                            if installed_app_id == app_id:
+                                install_success = True
+                                install_end_time = str(datetime.utcnow()).split()[1]
+                                install_time_ms = getTimeInMilliSec(install_end_time) - getTimeInMilliSec(install_start_time)
+                                print(f"\n App {app_id} installed successfully in {install_time_ms}ms \n")
+                                print(f"\n App Instance ID: {app_instance_id} \n")
+                                break
+                except Exception as e:
+                    print(f"Error parsing installation event: {e}")
+                    continue
+            install_count += 1
+
+        if install_success:
+            return "SUCCESS", install_time_ms, app_instance_id
+        else:
+            print(f"\n Installation did not complete within timeout period ({install_timeout} seconds) \n")
+            return "FAILURE", 0, ""
+
+    except Exception as e:
+        print(f"\n Exception occurred during app installation: {e} \n")
+        return "FAILURE", 0, ""
+
+#---------------------------------------------------------------
+#LAUNCH APP USING APP MANAGER
+#---------------------------------------------------------------
+def rdkv_launch_app_with_timing(event_listener, app_id, launch_timeout=120):
+    """
+    Launch an app using App Manager and measure launch time
+    Returns: (status, launch_time_ms, launched_time)
+    """
+    try:
+        launch_start_time = str(datetime.utcnow()).split()[1]
+        print(f"\n Launching app {app_id} at: {launch_start_time} \n")
+
+        launch_params = '{"appId":"' + app_id + '"}'
+        result = rdkservice_setValue("org.rdk.AppManager.1.launchApp", launch_params)
+
+        if result == "EXCEPTION OCCURRED":
+            print(f"\n Error while launching app {app_id} \n")
+            return "FAILURE", 0, ""
+
+        print(f"\n App launch request submitted successfully for {app_id} \n")
+
+        # Measure app launch time using existing library function
+        success, launched_time, time_taken_for_launch = measure_app_launch_time(app_id, launch_start_time, event_listener, launch_timeout)
+
+        if success and launched_time:
+            print(f"\n App {app_id} launched successfully in {time_taken_for_launch}ms \n")
+            return "SUCCESS", time_taken_for_launch, launched_time
+        else:
+            print(f"\n App {app_id} did not become ACTIVE within timeout period \n")
+            return "FAILURE", 0, ""
+
+    except Exception as e:
+        print(f"\n Exception occurred during app launch: {e} \n")
+        return "FAILURE", 0, ""
+
+#---------------------------------------------------------------
+#TERMINATE APP USING APP MANAGER
+#---------------------------------------------------------------
+def rdkv_terminate_app(app_id):
+    """
+    Common function to terminate an app using App Manager
+    Returns: status (SUCCESS/FAILURE)
+    """
+    try:
+        print(f"\n Terminating app {app_id} \n")
+        
+        terminate_params = '{"appId":"' + app_id + '"}'
+        result = rdkservice_setValue("org.rdk.AppManager.1.terminateApp", terminate_params)
+        
+        if result != "EXCEPTION OCCURRED":
+            print(f"\n App {app_id} terminated successfully \n")
+            return "SUCCESS"
+        else:
+            print(f"\n Unable to terminate app {app_id} \n")
+            return "FAILURE"
+            
+    except Exception as e:
+        print(f"\n Exception occurred while terminating app {app_id}: {e} \n")
+        return "FAILURE"
+
+#---------------------------------------------------------------
+#VALIDATE APP PERFORMANCE AGAINST THRESHOLDS
+#---------------------------------------------------------------
+def validate_app_performance_thresholds(conf_file, results_dict, threshold_keys):
+    """
+    Common function to validate app performance metrics against thresholds
+    threshold_keys: dict with keys like {"launch": "APP_LAUNCH_THRESHOLD_VALUE", "download": "APP_DOWNLOAD_THRESHOLD_VALUE"}
+    Returns: (overall_status, validation_results)
+    """
+    validation_results = {}
+    overall_status = "SUCCESS"
+    
+    try:
+        for metric, threshold_key in threshold_keys.items():
+            if metric + "_time" in results_dict and results_dict[metric + "_success"]:
+                time_taken = results_dict[metric + "_time"]
+                is_valid, threshold_value, offset = validate_time_with_threshold(time_taken, conf_file, threshold_key)
+                
+                validation_results[metric] = {
+                    "time_taken": time_taken,
+                    "threshold": threshold_value,
+                    "offset": offset,
+                    "is_valid": is_valid,
+                    "status": "SUCCESS" if is_valid else "FAILURE"
+                }
+                
+                print(f"\n {metric.capitalize()} Time: {time_taken}ms, Threshold: {threshold_value}ms, Valid: {is_valid} \n")
+                
+                if not is_valid:
+                    overall_status = "FAILURE"
+            else:
+                validation_results[metric] = {
+                    "status": "FAILURE",
+                    "error": f"{metric} operation failed"
+                }
+                overall_status = "FAILURE"
+        
+        return overall_status, validation_results
+        
+    except Exception as e:
+        print(f"\n Exception occurred during threshold validation: {e} \n")
+        return "FAILURE", {}
+
+#---------------------------------------------------------------
+# GET THE LIST OF INSTALLED PACKAGES USING PACKAGE MANAGER
+#---------------------------------------------------------------
+def rdkv_getInstalledPackages():
+    """
+    Function to get the list of installed packages in device using Package Manager
+    Returns: status (SUCCESS/FAILURE), package_ids (if SUCCESS, else empty list)
+    """
+    try:
+        print(f"\nGetting the list of installed packages")
+
+        result = rdkservice_getValue("org.rdk.AppPackageManager.1.listPackages")
+        if result != "EXCEPTION OCCURRED":
+            package_ids = [item["packageId"] for item in result if item["state"] == "INSTALLED"]
+            print(f"\nList of packages installed in device: {package_ids}")
+            return "SUCCESS", package_ids
+        else:
+            print(f"\nFailed to get the list of installed packages")
+            return "FAILURE", []
+
+    except Exception as e:
+        print(f"\nException occurred while getting the list of installed packages: {e}")
+        return "FAILURE", []
+
+#---------------------------------------------------------------
+# DOWNLOAD THE APP BUNDLE FROM THE URL
+#---------------------------------------------------------------
+def rdkservice_download_app_bundle(download_url):
+    if download_url:
+        print(f"Going to download the bundle {download_url}")
+        download_params = '{"url":"' + download_url + '"}'
+        result = rdkservice_setValue("org.rdk.DownloadManager.1.download", download_params)
+    else:
+        print("Please provide valid download URL")
+        result = "EXCEPTION OCCURRED"
+    return result
+
+#---------------------------------------------------------------
+#INSTALL THE DOWNLOADED APP BUNDLE
+#---------------------------------------------------------------
+def rdkservice_install_app(fileLocator, app_id):
+    params = '{ "packageId": "' +app_id+ '", "version": "0.1.0", "additionalMetadata": [ {"name": "type", "value": "native/dac-app"} ], "fileLocator":"' + fileLocator +'" }'
+    print(params)
+    result = rdkservice_setValue("org.rdk.AppPackageManager.install",params)
+    return result
+#---------------------------------------------------------------
+#UNINSTALL APP
+#---------------------------------------------------------------
+def rdkservice_uninstall_app(app_id):
+    params = '{ "packageId": "' +app_id+ '" }'
+    print(params)
+    result = rdkservice_setValue("org.rdk.AppPackageManager.uninstall",params)
+    return result
+#---------------------------------------------------------------
+#CLOSE APP
+#---------------------------------------------------------------
+def rdkservice_close_app(app_id):
+    params = '{ "appId": "' +app_id+ '" }'
+    print(params)
+    result = rdkservice_setValue("org.rdk.AppManager.closeApp",params)
+    return result
+
+#---------------------------------------------------------------
+#LAUNCH INSTALLED APP
+#---------------------------------------------------------------
+def rdkservice_launch_app(app_name):
+    params='{"appId": "' + app_name +'", "intent": "", "launchArgs": ""}'
+    result = rdkservice_setValue("org.rdk.AppManager.launchApp", params)
+    return result
+
+#---------------------------------------------------------------
+#GET LOADED APPS
+#---------------------------------------------------------------
+def rdkservice_get_loaded_apps():
+    result = rdkservice_getValue("org.rdk.AppManager.getLoadedApps")
+    app_ids =[]
+    if result != "EXCEPTION OCCURRED":
+        app_ids = [item["appId"] for item in result if item["lifecycleState"] == "APP_STATE_ACTIVE"]
+    return app_ids
+
+#---------------------------------------------------------------
+# FULL WORKFLOW OF APP LAUNCH USING APPMANAGER
+#---------------------------------------------------------------
+def rdkservice_install_launch_app(obj,app_bundle_name, app_name, app_download_url = PerformanceTestVariables.app_download_url,launch =True):
+    expectedResult="SUCCESS"
+    tdkTestObj = obj.createTestStep('rdkv_getInstalledPackages')
+    tdkTestObj.executeTestCase(expectedResult)
+    print(f"\nCheck if {app_name} is installed in the device")
+    status = tdkTestObj.getResult()
+    details = tdkTestObj.getResultDetails()
+    if status == "SUCCESS" and app_name in details:
+        tdkTestObj.setResultStatus("SUCCESS")
+        print("\nApp is already installed. Skipping the installation")
+        Isinstalled = True
+    elif status == "FAILURE":
+        tdkTestObj.setResultStatus("FAILURE")
+        return status
+    else:
+        Isinstalled = False
+        tdkTestObj.setResultStatus("SUCCESS")
+        print("\nApp is not installed in the device")
+        status = "SUCCESS"
+        plugins_list = ["org.rdk.DownloadManager", "org.rdk.AppPackageManager", "org.rdk.AppManager"]
+        plugin_status_needed = {"org.rdk.DownloadManager":"activated", "org.rdk.AppPackageManager":"activated", "org.rdk.AppManager":"activated"}
+        curr_plugins_status_dict = StabilityTestUtility.get_plugins_status(obj,plugins_list)
+        if curr_plugins_status_dict != plugin_status_needed:
+            revert = "YES"
+            status = StabilityTestUtility.set_plugins_status(obj,plugin_status_needed)
+            time.sleep(10)
+        if status == "SUCCESS":
+    #        app_download_url = PerformanceTestVariables.app_download_url
+            app_download_url = app_download_url + "/" + app_bundle_name
+            tdkTestObj = obj.createTestStep('rdkservice_download_app_bundle')
+            tdkTestObj.addParameter("download_url", app_download_url)
+            tdkTestObj.executeTestCase(expectedResult)
+            status = tdkTestObj.getResult()
+            details = tdkTestObj.getResultDetails()
+            if status == "SUCCESS":
+                tdkTestObj.setResultStatus("SUCCESS")
+                time.sleep(10)
+                print(f"Successfully downloaded {app_bundle_name}")
+                conf_file,result = getConfigFileName(libObj.realpath)
+                fileLocator = ""
+                if result == "SUCCESS":
+                    status,fileLocator = getDeviceConfigKeyValue(conf_file,"PACKAGEMANAGER_FILE_LOCATOR")
+                if fileLocator != "":
+                    fileLocator = fileLocator + str(details)
+                    tdkTestObj = obj.createTestStep('rdkservice_install_app')
+                    tdkTestObj.addParameter("fileLocator", fileLocator)
+                    tdkTestObj.addParameter("app_id", app_name)
+
+                    tdkTestObj.executeTestCase(expectedResult)
+                    status = tdkTestObj.getResult()
+                    details = tdkTestObj.getResultDetails()
+                    if status == "SUCCESS":
+                        tdkTestObj.setResultStatus("SUCCESS")
+                        tdkTestObj = obj.createTestStep('rdkv_getInstalledPackages')
+                        tdkTestObj.executeTestCase(expectedResult)
+                        print(f"Check if the app is installed successfully")
+                        status = tdkTestObj.getResult()
+                        details = tdkTestObj.getResultDetails()
+                        if status == "SUCCESS" and app_name in details:
+                            tdkTestObj.setResultStatus("SUCCESS")
+                            print(f"Successfully installed {app_bundle_name} as {app_name}")
+                            Isinstalled=True
+                        else:
+                            tdkTestObj.setResultStatus("FAILURE")
+                            print(f"{app_bundle_name} is not listed in the packages even after installing")
+                    else:
+                        tdkTestObj.setResultStatus("FAILURE")
+                        print(f"Failed to install {app_bundle_name}")
+                else:
+                    tdkTestObj.setResultStatus("FAILURE")
+                    print(f"Failed to get file locator for {app_bundle_name}")
+            else:
+                tdkTestObj.setResultStatus("FAILURE")
+                print(f"Failed to download {app_bundle_name}")
+        else:
+            tdkTestObj.setResultStatus("FAILURE")
+            print("Unable to activate the AppManagers")
+            status ="FAILURE"
+    if Isinstalled and launch:
+        tdkTestObj = obj.createTestStep('rdkservice_launch_app')
+        tdkTestObj.addParameter("app_name", app_name)
+
+        tdkTestObj.executeTestCase(expectedResult)
+        print(f"\nLaunching {app_name}")
+        status = tdkTestObj.getResult()
+        details = tdkTestObj.getResultDetails()
+
+        if status == "SUCCESS":
+            tdkTestObj.setResultStatus("SUCCESS")
+            time.sleep(10)
+            print(f"\nCheck if {app_name} is launched")
+            app_ids = rdkservice_get_loaded_apps()
+            if app_name in app_ids:
+                print(f"\nSuccessfully launched {app_name}")
+                tdkTestObj.setResultStatus("SUCCESS")
+            else:
+                status = "FAILURE"
+                tdkTestObj.setResultStatus("FAILURE")
+                print(f"{app_name} is not listed as loadedapps")
+        else:
+            tdkTestObj.setResultStatus("FAILURE")
+            print(f"\nFailed to launch {app_name}")
+    return status
+#---------------------------------------------------------------------------------------------
+# Function to set the PersistentStore value 'MVS:lightningURL' via JSON-RPC using curl command
+#---------------------------------------------------------------------------------------------
+def setPS_value(video_test_url):
+    # Format the lightning URL to escape special characters
+    lightning_url = video_test_url.replace("\\", "\\\\").replace('"', '\\"')
+    device_url = f"http://{deviceIP}:{devicePort}/jsonrpc"
+    payload = ('{"jsonrpc":"2.0","id":1,''"method":"org.rdk.PersistentStore.setValue",''"params":{''"namespace":"MVS",''"key":"lightningURL",'f'"value":"{lightning_url}"''}}')
+    curl_command = ["curl", "-H", "Content-Type: application/json", "-d", payload, device_url]
+    print("\nSetting the value of lightningURL in PersistentStore: ", curl_command)
+    try:
+        result = subprocess.run(curl_command, capture_output=True, text=True, timeout=30)
+        return result.stdout
+    except Exception as e:
+        print("Failed to set the PersistentStore value: ", e)
+        return None
+
+#-----------------------------------------------------------------------------------------
+#TO PRESS KEYS IN UI USING APP MANAGER 
+#-----------------------------------------------------------------------------------------
+def browsertest_keypress(obj,app_name,keys):
+   
+    key_navigate = keys
+    result="FAILURE"
+    param='['
+    index=0
+    expectedResult= "SUCCESS"
+    tdkTestObj = obj.createTestStep('rdkservice_getValue')
+    tdkTestObj.addParameter("method","org.rdk.AppManager.getLoadedApps")
+    tdkTestObj.executeTestCase(expectedResult)
+    print(f"Getting the app instance id of {app_name}")
+    result = tdkTestObj.getResultDetails()
+    status = tdkTestObj.getResult()
+    if status == expectedResult and app_name in result:
+        appinstanceid=""
+        result = ast.literal_eval(result)
+        for item in result:
+            if isinstance(item, dict) and item.get("appId") == app_name:
+                appinstanceid = item.get("appInstanceId")
+        if appinstanceid != "":
+            print("####App instance id of the launched app is: ", appinstanceid)
+            for key in key_navigate:
+                if ":" in key:
+                    param = param + '{\\"keyCode\\": ' + key + ',\\"modifiers\\": ['+ key.split(":")[0] +'],\\"delay\\":0.1}'
+                else:
+                    param = param + '{\\"keyCode\\": ' + key + ',\\"modifiers\\": [],\\"delay\\":0.1}'
+                if index != (len(key_navigate)-1):
+                    param = param + ','
+                else:
+                    param = param + ']'
+                index +=1
+
+            params = '{"client":' + appinstanceid + ',"keys":"{\\"keys\\":'+ param + '}"'
+
+
+            tdkTestObj = obj.createTestStep('rdkservice_setValue')
+            tdkTestObj.addParameter("method","org.rdk.RDKWindowManager.generateKey")
+            tdkTestObj.addParameter("value",params)
+            tdkTestObj.executeTestCase(expectedResult)
+            result = tdkTestObj.getResult()
+            if expectedResult in result:
+                tdkTestObj.setResultStatus("SUCCESS")
+                print("SUCCESS: Navigated through UI and started the test")
+                result = "SUCCESS"
+            else:
+                tdkTestObj.setResultStatus("FAILURE")
+                print("FAILURE : Failed to start the test by navigating through UI")
+        else:
+            print("Failed to get appinstanceId")
+            tdkTestObj.setResultStatus("FAILURE")
+    else:
+        print("Failed to get the loaded apps")
+        tdkTestObj.setResultStatus("FAILURE")
+    return result  
+
+#This function retrieves the playback timestamps from the application log file for the specified app.
+    
+def getPlaybackTimestamps(obj, app_name):
+    app_log_file = obj.logpath+"/"+str(obj.execID)+"/"+str(obj.execID)+"_"+str(obj.execDevId)+"_"+str(obj.resultId)+"_mvs_applog.txt"
+    continue_count = 0
+    file_check_count = 0
+    logging_flag = 0
+    load_video = ""
+    playback_started = ""
+    lastIndex = 0
+    while True:
+        if file_check_count > 60:
+            print("\nREST API Logging is not happening properly. Exiting...")
+            break;
+        if os.path.exists(app_log_file):
+            logging_flag = 1
+            break;
+        else:
+            file_check_count += 1
+            time.sleep(1);
+    while logging_flag:
+        if continue_count > 60:
+            print("\nApp not proceeding for 60 secs. Exiting...")
+            break;
+        with open(app_log_file,'r') as f:
+            lines = f.readlines()
+        if lines:
+            if len(lines) != lastIndex:
+                continue_count = 0
+                for i in range(lastIndex,len(lines)):
+                    print(lines[i])
+                    if "Video Player Playing" in lines[i]:
+                        print("Found 'Video Player Playing' log line: {}".format(lines[i]))
+                        playback_match = re.search(r"\b\d{2}:\d{2}:\d{2}(?:[.:]\d+)?\b", lines[i])
+                        playback_started = playback_match.group(0) if playback_match else ""
+                        print("Video Player Playing at: {}".format(playback_started))
+
+                lastIndex = len(lines)
+                if playback_started != "":
+                    break;
+            else:
+                continue_count += 1
+        else:
+            continue_count += 1
+        time.sleep(1)
+
+    if playback_started != "":
+        ssh_params = rdkservice_getSSHParams(obj.realpath, obj.IP)
+        if ssh_params == "" or ssh_params == "{}":
+            print("Failed to get SSH parameters from configuration")
+            return "", playback_started
+
+        ssh_params_dict = json.loads(ssh_params)
+        ssh_method = ssh_params_dict.get("ssh_method")
+        credentials = ssh_params_dict.get("credentials")
+
+        if not ssh_method or not credentials:
+            print("SSH method or credentials not found in configuration")
+            return "", playback_started
+
+        cmd = "grep DEFAULT_APP_STORAGE_PATH /etc/device.properties | cut -d'=' -f2"
+        log_path = rdkservice_getRequiredLog(ssh_method, credentials, cmd)
+        log_path_lines = [line.strip() for line in log_path.splitlines() if line.strip()]
+        if not log_path_lines:
+            print("Failed to get the application storage path")
+            return "", playback_started
+        log_path = log_path_lines[-1]
+        log_file = log_path +"/" + app_name + "/"+ app_name+".log"
+        cmd = f"grep -i 'wpe load committed' {log_file} | tail -n 1 | cut -d' ' -f2 | sed 's/:$//'"
+        output = rdkservice_getRequiredLog(ssh_method, credentials, cmd)
+        clean_output = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", output)
+        load_match = re.search(r"\b\d{2}:\d{2}:\d{2}(?:[.:]\d+)?\b", clean_output)
+        load_video = load_match.group(0) if load_match else ""
+        print("load_video:", load_video) 
+        if not load_video:
+            print("Failed to get the load video time")
+            return "", playback_started
+    else:
+        print("Playback did not start")
+        return "", ""
+    
+    return load_video, playback_started    
+
+# Function to test successive playback of video streams
+def testSuccessivePlayback(obj,expected_streams):
+    app_log_file = obj.logpath+"/"+str(obj.execID)+"/"+str(obj.execID)+"_"+str(obj.execDevId)+"_"+str(obj.resultId)+"_mvs_applog.txt"
+    continue_count = 0
+    file_check_count = 0
+    logging_flag = 0
+    hang_detected = 0
+    test_result = ""
+    expected_play_evt = ""
+    observed_play_evt = ""
+    expected_pause_evt = ""
+    observed_pause_evt = ""
+    lastLine = None
+    lastIndex = 0
+    play_event_count = 0
+    stream_results = {}
+    while True:
+        if file_check_count > 60:
+            print("\nREST API Logging is not happening properly. Exiting...")
+            break;
+        if os.path.exists(app_log_file):
+            logging_flag = 1
+            break;
+        else:
+            file_check_count += 1
+            time.sleep(1);
+    while logging_flag:
+        if continue_count > 60:
+            hang_detected = 1
+            print("\nApp not proceeding for 60 secs. Exiting...")
+            break;
+        with open(app_log_file,'r') as f:
+            lines = f.readlines()
+        if lines:
+            if len(lines) != lastIndex:
+                continue_count = 0
+                for i in range(lastIndex,len(lines)):
+                    print(lines[i])
+                    if "Video Player Playing" in lines[i]:
+                        play_event_count += 1
+                    stream_match = re.search(r"STREAM (\d+) PLAYBACK RESULT\s*:\s*(SUCCESS|FAILURE)", lines[i])
+                    if stream_match:
+                        stream_results[int(stream_match.group(1))] = stream_match.group(2)
+                    elif "TEST RESULT:" in lines[i]:
+                        test_result = lines[i]
+                lastIndex = len(lines)
+                if test_result != "":
+                    break;
+            else:
+                continue_count += 1
+        else:
+            continue_count += 1
+        time.sleep(1)
+    playback_status = "FAILURE"
+    streams_ok = True
+    for stream_num in range(1,expected_streams+1):
+        if stream_results.get(stream_num) != "SUCCESS":
+            streams_ok = False
+            print("\n Stream {} did not report a successful playback".format(stream_num))
+    if play_event_count < expected_streams:
+        print("\n Only {} of {} streams started playback".format(play_event_count,expected_streams))
+    elif not streams_ok:
+        print("\n Playback started on all {} streams, but not all of them completed successfully".format(expected_streams))
+    elif "TEST RESULT: SUCCESS" not in test_result:
+        print("\n Final test result is not SUCCESS")
+    else:
+        playback_status = "SUCCESS"
+    return test_result,play_event_count,stream_results,playback_status    

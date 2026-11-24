@@ -1,0 +1,251 @@
+##########################################################################
+# If not stated otherwise in this file or this component's Licenses.txt
+# file the following copyright and licenses apply:
+#
+# Copyright 2021 RDK Management
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#########################################################################
+
+import time
+import os
+import json
+import inspect
+import importlib
+import subprocess
+import configparser
+import MediaValidationVariables
+from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common import exceptions
+from rdkv_performancelib import getDeviceConfigKeyValue
+from SSHUtility import *
+
+deviceIP=""
+devicePort=""
+deviceName=""
+deviceType=""
+logged_config_files = set()
+
+MEDIA_STEP_DESCRIPTIONS = {
+    "rdkv_media_pre_requisites": "Prepare media test prerequisites",
+    "rdkv_media_test": "Validate media playback operation",
+    "rdkv_media_post_requisites": "Clean up media test prerequisites",
+    "rdkv_media_getProcCheckInfo": "Read media process-validation configuration",
+    "rdkv_media_checkProcEntry": "Validate media player process status",
+    "rdkservice_getPluginStatus": "Verify media plugin status",
+    "rdkservice_setPluginStatus": "Set media plugin status",
+    "rdkservice_setValue": "Configure media device value",
+    "rdkv_media_readUIData": "Read media data from UI",
+}
+
+
+def log_device_config_file(config_file):
+    if config_file not in logged_config_files:
+        print("[INFO]: Using Device config file: %s" % config_file)
+        logged_config_files.add(config_file)
+
+
+def get_step_description(method, params):
+    description = MEDIA_STEP_DESCRIPTIONS.get(method, method)
+    if method in ("rdkservice_getPluginStatus", "rdkservice_setPluginStatus"):
+        plugin = params.get("plugin")
+        if plugin:
+            description = "%s: %s" % (description, plugin)
+    elif method == "rdkservice_setValue":
+        device_method = params.get("method")
+        if device_method:
+            description = "%s: %s" % (description, device_method)
+    return description
+
+#METHODS
+#---------------------------------------------------------------
+#INITIALIZE THE MODULE
+#---------------------------------------------------------------
+def init_module(libobj,port,deviceInfo):
+    global deviceIP
+    global devicePort
+    global deviceName
+    global deviceType
+    deviceIP = libobj.ip;
+    devicePort = port
+    deviceName = deviceInfo["devicename"]
+    deviceType = deviceInfo["boxtype"]
+
+
+def rdkv_media_pre_requisites():
+    return "SUCCESS"
+def rdkv_media_test():
+    return "SUCCESS"
+def rdkv_media_post_requisites():
+    return "SUCCESS"
+
+#----------------------------------------------------------------------
+#GET THE NAME OF DEVICE CONFIG FILE
+#----------------------------------------------------------------------
+def getDeviceConfigFile(basePath):
+    deviceConfigFile=""
+    status ="SUCCESS"
+    configPath = os.path.join(
+        os.path.normpath(basePath), "fileStore", "tdkvRDKServiceConfig"
+    )
+    deviceNameConfigFile = configPath + "/" + deviceName + ".config"
+    deviceTypeConfigFile = configPath + "/" + deviceType + ".config"
+    # Check whether device / platform config files required for
+    # executing the test are present
+    if os.path.exists(deviceNameConfigFile) == True:
+        deviceConfigFile = deviceNameConfigFile
+        log_device_config_file(deviceNameConfigFile)
+    elif os.path.exists(deviceTypeConfigFile) == True:
+        deviceConfigFile = deviceTypeConfigFile
+        log_device_config_file(deviceTypeConfigFile)
+    else:
+        status = "FAILURE"
+        print("[ERROR]: No Device config file found : %s or %s" %(deviceNameConfigFile,deviceTypeConfigFile))
+    return deviceConfigFile,status;
+
+
+#-------------------------------------------------------------------
+# Function to read the proc validation parameters from device config file
+#-------------------------------------------------------------------
+def rdkv_media_getProcCheckInfo(realpath):
+    validation_dict = {}
+    print("\n Reading proc validation params from conf file...")
+    conf_file,result = getDeviceConfigFile(realpath)
+    result, proc_check = getDeviceConfigKeyValue(conf_file,"PROC_VALIDATION")
+    if result == "SUCCESS":
+        if proc_check == "NO":
+            validation_dict["proc_check"] = False
+        else:
+            validation_dict["proc_check"] = True
+            result,validation_dict["ssh_method"]    = getDeviceConfigKeyValue(conf_file,"SSH_METHOD")
+            validation_dict["host_name"] = deviceIP
+            result,validation_dict["user_name"] = getDeviceConfigKeyValue(conf_file,"SSH_USERNAME")
+            result,validation_dict["password"]  = getDeviceConfigKeyValue(conf_file,"SSH_PASSWORD")
+            result,validation_dict["validation_script"] = getDeviceConfigKeyValue(conf_file,"VIDEO_VALIDATION_SCRIPT_FILE")
+            if validation_dict["password"] == "None":
+                password = ""
+            else:
+                password = validation_dict["password"]
+            credentials = validation_dict["host_name"]+','+validation_dict["user_name"]+','+password
+            validation_dict["credentials"] = credentials
+    else:
+        print("Failed to get the validation parameters from config file, please configure values before test")
+    if any(value == "" for value in list(validation_dict.values())):
+        print("please configure validation parameters before test")
+        validation_dict = {}
+    return validation_dict
+
+
+#-------------------------------------------------------------------
+# Function to check required pattern in proc entry file
+#-------------------------------------------------------------------
+def rdkv_media_checkProcEntry(sshMethod,credentials,validation_script,mode):
+    result = "FAILURE"
+    validation_script = validation_script.split('.py')[0]
+    try:
+        lib = importlib.import_module(validation_script)
+        method = "check_video_status"
+        method_to_call = getattr(lib, method)
+        result = method_to_call(sshMethod,credentials,mode)
+    except Exception as e:
+        print(e);
+        print("[ERROR]: Failed to import video validation script file, please check the configuration")
+        result = "FAILURE"
+    finally:
+        return result
+
+
+#-------------------------------------------------------------------
+#SET WEBDRIVER AND OPEN CHROME BROWSER
+#-------------------------------------------------------------------
+def openChromeBrowser(url):
+    #https://askubuntu.com/questions/432255/what-is-the-display-environment-variable
+    os.environ["DISPLAY"] = MediaValidationVariables.display_variable;
+    os.environ["PATH"] += MediaValidationVariables.path_of_browser_executable;
+    try:
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        driver = webdriver.Chrome(chrome_options=chrome_options) #Opening Chrome
+        driver.get(url);
+    except Exception as error:
+        print("Got exception while opening the browser")
+        print(error)
+        driver = "EXCEPTION OCCURRED"
+    return driver;
+
+#-------------------------------------------------------------------
+#GET THE DATA FROM UI
+#-------------------------------------------------------------------
+def rdkv_media_readUIData(elementExpandXpath,dataXpath,count):
+    try:
+        webinspectURL = 'http://' + deviceIP + ':' + MediaValidationVariables.webinspect_port_lightning + '/Main.html?ws=' + deviceIP + ':' + MediaValidationVariables.webinspect_port_lightning + '/socket/1/1/WebPage'
+        print("url:",webinspectURL)
+        driver = openChromeBrowser(webinspectURL);
+        if driver != "EXCEPTION OCCURRED":
+            time.sleep(10)
+            action = ActionChains(driver)
+            source = driver.find_element_by_xpath(elementExpandXpath)
+            time.sleep(3)
+            action.move_to_element(source).context_click().perform()
+            time.sleep(10)
+            options = driver.find_elements_by_class_name('soft-context-menu')
+            time.sleep(3)
+            try:
+                for option in options:
+                    current_option = option.find_elements_by_class_name('item')
+                    time.sleep(3)
+                    for item in current_option:
+                        if "Expand All" in item.text:
+                            item.click()
+            except exceptions.StaleElementReferenceException as e:
+                pass
+            time.sleep(10)
+            ui_data_list = []
+            for i in range(0,count):
+                ui_data = driver.find_element_by_xpath(dataXpath).text
+                if ui_data != None and str(ui_data).strip() != "":
+                    ui_data_list.append(str(ui_data))
+                time.sleep(2)
+            ui_data_list = [ x for x in ui_data_list if x != None ]
+            ui_data = str(",".join(ui_data_list))
+            print("\n Data read from web UI: ",ui_data)
+            time.sleep(5)
+            driver.quit()
+        else:
+            ui_data = "Unable to get the data from the web UI"
+    except Exception as error:
+        print("Got exception while getting the data from the web UI")
+        print(error)
+        ui_data = "Unable to get the data from the web UI"
+        driver.quit()
+    return ui_data
+
+#---------------------------------------------------------------------------------------------
+# Function to set the PersistentStore value 'MVS:lightningURL' via JSON-RPC using curl command
+#---------------------------------------------------------------------------------------------
+def setPS_value(video_test_url):
+    # Format the lightning URL to escape special characters
+    url_str = json.dumps(video_test_url) if isinstance(video_test_url, list) else video_test_url
+    lightning_url = url_str.replace("\\", "\\\\").replace('"', '\\"')
+    device_url = f"http://{deviceIP}:{devicePort}/jsonrpc"
+    payload = ('{"jsonrpc":"2.0","id":1,''"method":"org.rdk.PersistentStore.setValue",''"params":{''"namespace":"MVS",''"key":"lightningURL",'f'"value":"{lightning_url}"''}}')
+    curl_command = ["curl", "-H", "Content-Type: application/json", "-d", payload, device_url]
+    print("\nSetting the value of lightningURL in PersistentStore: ", curl_command)
+    try:
+        result = subprocess.run(curl_command, capture_output=True, text=True, timeout=30)
+        return result.stdout
+    except Exception as e:
+        print("Failed to set the PersistentStore value: ", e)
+        return None
