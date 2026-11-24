@@ -1,0 +1,1201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ If not stated otherwise in this file or this component's Licenses.txt file the
+ following copyright and licenses apply:
+ Copyright 2025 RDK Management
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+ http://www.apache.org/licenses/LICENSE-2.0
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+<testPlugin pluginName="UserSettings" pluginVersion="1">
+	<pluginPreRequisite>
+	  <!-- PluginPreRequisite 1 -->
+          <prerequisite requisiteId="1" requisiteName="Activate_Plugin">
+            <testStep testStepId="1" name="Check_PluginActive_Status" method="Get_Plugin_Status" saveResult="true" pluginName="Controller">
+                <params>
+                  <param tag="plugin" value="org.rdk.UserSettings" indexOnly="true"/>
+                </params>
+                <resultGeneration useMethodTag="controller_get_plugin_state" arguments="check_status,org.rdk.UserSettings"/>
+            </testStep>
+            <testStep testStepId="2" name="Activate_Plugin" method="Activate_Plugin"  pluginName="Controller">
+                <conditionalExecution enable="true" Id="1" useMethodTag="controller_get_plugin_state" arguments="isDeactivated,org.rdk.UserSettings"/>
+                <params>
+                  <param tag="callsign" value="org.rdk.UserSettings"/>
+                </params>
+            </testStep>
+            <testStep testStepId="3" name="Check_PluginActive_Status" method="Get_Plugin_Status" pluginName="Controller">
+                <conditionalExecution enable="true" Id="1" useMethodTag="controller_get_plugin_state" arguments="isDeactivated,org.rdk.UserSettings"/>
+                <params>
+                  <param tag="plugin" value="org.rdk.UserSettings" indexOnly="true"/>
+                </params>
+                <resultGeneration useMethodTag="controller_get_plugin_state" arguments="check_status,org.rdk.UserSettings" expectedValues="activated"/>
+            </testStep>
+    	  </prerequisite>
+
+	  <!-- Event Registration -->
+      	  <prerequisite requisiteId="2" requisiteName="Register_And_Listen_Events" type="eventRegister" trace="false">
+		<event pluginName="UserSettings" eventName="Event_On_AudioDescriptionChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_CaptionsChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_PinControlChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_LiveWatershedChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_PlaybackWatershedChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_PinOnPurchaseChanged"/>
+                <event pluginName="UserSettings" eventName="Event_On_BlockNotRatedContentChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_HighContrastChanged"/>
+                <event pluginName="UserSettings" eventName="Event_On_VoiceGuidanceChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_VoiceGuidanceHintsChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_ContentPinChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_PrivacyModeChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_PreferredAudioLanguagesChanged"/>
+		<event pluginName="UserSettings" eventName="Event_On_PresentationLanguageChanged"/>
+      	  </prerequisite>
+  	</pluginPreRequisite>
+
+	<!-- Test case 01 -->
+	<testCase testCaseId="US_01" testCaseName="UserSettings_Audio_Description_Enable_Disable" desc="Verifying the enable/disable functionality of the audio description setting">
+        	<testCaseInfo testCaseType="setandget" revert="true" />
+        	<testStep testStepId="1" name="Get_Audio_Description" method="UserSettings_getAudioDescription" saveResult="true" revertGet="yes">
+          	<resultGeneration useMethodTag="usersettings_get_enabled_status">
+            		<expectedValues useDefault="true"/>
+          	</resultGeneration>
+        	</testStep>
+        	<testStep testStepId="2" name="Set_Audio_Description" method="UserSettings_setAudioDescription" revertSet="yes">
+          	<params>
+            		<param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status" revertParam="yes" />
+          	</params>
+		</testStep>
+        	<testStep testStepId="3" name="Get_Audio_Description" method="UserSettings_getAudioDescription" revertFlag="yes">
+          	<resultGeneration useMethodTag="usersettings_get_enabled_status" >
+            		<expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status"/>
+          	</resultGeneration>
+        	</testStep>
+    	</testCase>
+
+	<!-- Test case 02 -->
+        <testCase testCaseId="US_02" testCaseName="UserSettings_Check_On_AudioDescriptionChanged_Event" desc="Check if the event is triggered when the audio description enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_Audio_Description" method="UserSettings_getAudioDescription" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true" />
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Audio_Description" method="UserSettings_setAudioDescription" revertSet="yes">
+                <params>
+                        <param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status" revertParam="yes" />
+                </params>
+                </testStep>
+		<testStep testStepId="3" name="Check_On_AudioDescriptionChanged_Event" event="Event_On_AudioDescriptionChanged" action="eventListener" delay="3">
+		<resultGeneration useMethodTag="usersettings_check_enabled_change_event">
+			<expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status"/>
+		</resultGeneration>
+		</testStep>
+		<testStep testStepId="4" name="Get_Audio_Description" method="UserSettings_getAudioDescription" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 03 -->
+        <testCase testCaseId="US_03" testCaseName="UserSettings_Caption_Enable_Disable" desc="Verifying the enable/disable functionality of the caption setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_Caption" method="UserSettings_getCaptions" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Caption" method="UserSettings_setCaptions" revertSet="yes">
+                <params>
+                        <param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_Caption" method="UserSettings_getCaptions" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 04 -->
+        <testCase testCaseId="US_04" testCaseName="UserSettings_Check_On_CaptionsChanged_Event" desc="Check if the event is triggered when the caption enabled status changes">
+		<testCaseInfo testCaseType="setandget" revert="true" />
+		<testStep testStepId="1" name="Get_Caption" method="UserSettings_getCaptions" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Caption" method="UserSettings_setCaptions" revertSet="yes">
+                <params>
+                        <param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status" revertParam="yes" />
+                </params>
+                </testStep>
+		<testStep testStepId="3" name="Check_On_CaptionsChanged_Event" event="Event_On_CaptionsChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_enabled_change_event">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="4" name="Get_Caption" method="UserSettings_getCaptions" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_enabled_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 05 -->
+        <testCase testCaseId="US_05" testCaseName="UserSettings_PinControl_Enable_Disable" desc="Verifying the enable/disable functionality of the pincontrol setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_PinControl" method="UserSettings_getPinControl" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinControl" method="UserSettings_setPinControl" revertSet="yes">
+                <params>
+                        <param tag="pinControl" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_pinControl_status" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinControl" method="UserSettings_getPinControl" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_pinControl_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 06 -->
+        <testCase testCaseId="US_06" testCaseName="UserSettings_Check_On_PinControlChanged_Event" desc="Check if the event is triggered when the pincontrol enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_PinControl" method="UserSettings_getPinControl" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinControl" method="UserSettings_setPinControl" revertSet="yes">
+                <params>
+                        <param tag="pinControl" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_pinControl_status" revertParam="yes" />
+                </params>
+                </testStep>
+		<testStep testStepId="3" name="Check_On_PinControlChanged_Event" event="Event_On_PinControlChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_pinControl_change_event">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_pinControl_status"/>
+                </resultGeneration>
+		</testStep>
+		<testStep testStepId="4" name="Get_PinControl" method="UserSettings_getPinControl" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_pinControl_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 07 -->
+        <testCase testCaseId="US_07" testCaseName="UserSettings_LiveWatershed_Enable_Disable" desc="Verifying the enable/disable functionality of the LiveWatershed setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_LiveWatershed" method="UserSettings_setLiveWatershed" revertSet="yes">
+                <params>
+                        <param tag="liveWatershed" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_liveWatershed_status" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_liveWatershed_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 08 -->
+        <testCase testCaseId="US_08" testCaseName="UserSettings_Check_On_LiveWatershedChanged_Event" desc="Check if the event is triggered when the livewatershed enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_LiveWatershed" method="UserSettings_setLiveWatershed" revertSet="yes">
+                <params>
+                        <param tag="liveWatershed" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_liveWatershed_status" revertParam="yes" />
+                </params>
+                </testStep>
+		<testStep testStepId="3" name="Check_On_LiveWatershedChanged_Event" event="Event_On_LiveWatershedChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_liveWatershed_change_event">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_liveWatershed_status"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="4" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_liveWatershed_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 09 -->
+        <testCase testCaseId="US_09" testCaseName="UserSettings_PlaybackWatershed_Enable_Disable" desc="Verifying the enable/disable functionality of the PlaybackWatershed setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PlaybackWatershed" method="UserSettings_setPlaybackWatershed" revertSet="yes">
+                <params>
+                        <param tag="playbackWatershed" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_playbackWatershed_status" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_LiveWatershed" method="UserSettings_getPlaybackWatershed" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_playbackWatershed_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 10 -->
+        <testCase testCaseId="US_10" testCaseName="UserSettings_Check_On_PlaybackWatershedChanged_Event" desc="Check if the event is triggered when the playbackwatershed enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PlaybackWatershed" method="UserSettings_setPlaybackWatershed" revertSet="yes">
+                <params>
+                        <param tag="playbackWatershed" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_playbackWatershed_status" revertParam="yes" />
+                </params>
+                </testStep>
+		<testStep testStepId="3" name="Check_On_PlaybackWatershedChanged_Event" event="Event_On_PlaybackWatershedChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_playbackWatershed_change_event">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_playbackWatershed_status"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="4" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_playbackWatershed_status"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 11 -->
+	<testCase testCaseId="US_11" testCaseName="UserSettings_BlockNotRatedContent_Enable_Disable" desc="Verifying the enable/disable functionality of the BlockNotRatedContent setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_BlockNotRatedContent" method="UserSettings_setBlockNotRatedContent" revertSet="yes">
+                <params>
+                        <param tag="blockNotRatedContent" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="blockNotRatedContent" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="blockNotRatedContent"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 12 -->
+        <testCase testCaseId="US_12" testCaseName="UserSettings_Check_On_BlockNotRatedContent_Event" desc="Check if the event is triggered when the BlockNotRatedContent enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_BlockNotRatedContent" method="UserSettings_setBlockNotRatedContent" revertSet="yes">
+                <params>
+                        <param tag="blockNotRatedContent" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="blockNotRatedContent" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Check_On_BlockNotRatedContentChanged_Event" event="Event_On_BlockNotRatedContentChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="blockNotRatedContent">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="blockNotRatedContent"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="4" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="blockNotRatedContent"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 13 --> 
+	<testCase testCaseId="US_13" testCaseName="UserSettings_PinOnPurchase_Enable_Disable" desc="Verifying the enable/disable functionality of the PinOnPurchase setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinOnPurchase" method="UserSettings_setPinOnPurchase" revertSet="yes">
+                <params>
+                        <param tag="pinOnPurchase" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="pinOnPurchase" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="pinOnPurchase"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 14 -->
+        <testCase testCaseId="US_14" testCaseName="UserSettings_Check_On_PinOnPurchaseChanged_Event" desc="Check if the event is triggered when the pinOnPurchase enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+		<testStep testStepId="1" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinOnPurchase" method="UserSettings_setPinOnPurchase" revertSet="yes">
+                <params>
+                        <param tag="pinOnPurchase" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="pinOnPurchase" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Check_On_PinOnPurchaseChanged_Event" event="Event_On_PinOnPurchaseChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="pinOnPurchase">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="pinOnPurchase"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="4" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase" >
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="pinOnPurchase"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 15 -->
+        <testCase testCaseId="US_15" testCaseName="UserSettings_HighContrast_Enable_Disable" desc="Verifying the enable/disable functionality of the HighContrast setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_HighContrast" method="UserSettings_getHighContrast" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_HighContrast" method="UserSettings_setHighContrast" revertSet="yes">
+                <params>
+                        <param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_HighContrast" method="UserSettings_getHighContrast" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 16 -->
+        <testCase testCaseId="US_16" testCaseName="UserSettings_Check_On_HighContrastChanged_Event" desc="Check if the event is triggered when the HighContrastChanged enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+		<testStep testStepId="1" name="Get_HighContrast" method="UserSettings_getHighContrast" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_HighContrast" method="UserSettings_setHighContrast" revertSet="yes">
+                <params>
+                        <param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Check_On_HighContrastChanged_Event" event="Event_On_HighContrastChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="enabled">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="4" name="Get_HighContrast" method="UserSettings_getHighContrast" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 17 -->
+	<testCase testCaseId="US_17" testCaseName="UserSettings_VoiceGuidance_Enable_Disable" desc="Verifying the enable/disable functionality of the VoiceGuidance setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_VoiceGuidance" method="UserSettings_getVoiceGuidance" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_VoiceGuidance" method="UserSettings_setVoiceGuidance" revertSet="yes">
+                <params>
+                        <param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_VoiceGuidance" method="UserSettings_getVoiceGuidance" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 18 -->
+	<testCase testCaseId="US_18" testCaseName="UserSettings_Check_On_VoiceGuidanceChanged_Event" desc="Check if the event is triggered when the VoiceGuidanceChanged enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+		<testStep testStepId="1" name="Get_VoiceGuidance" method="UserSettings_getVoiceGuidance" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_VoiceGuidance" method="UserSettings_setVoiceGuidance" revertSet="yes">
+                <params>
+                        <param tag="enabled" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Check_On_VoiceGuidanceChanged_Event" event="Event_On_VoiceGuidanceChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="enabled">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="4" name="Get_VoiceGuidance" method="UserSettings_getVoiceGuidance" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="enabled"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 19 -->
+        <testCase testCaseId="US_19" testCaseName="UserSettings_VoiceGuidanceHints_Enable_Disable" desc="Verifying the enable/disable functionality of the VoiceGuidanceHints setting">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_VoiceGuidanceHints" method="UserSettings_getVoiceGuidanceHints" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="hints">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_VoiceGuidanceHints" method="UserSettings_setVoiceGuidanceHints" revertSet="yes">
+                <params>
+                        <param tag="hints" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="hints" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_VoiceGuidanceHints" method="UserSettings_getVoiceGuidanceHints" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="hints">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="hints"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+	
+	<!-- Test case 20 -->
+	<testCase testCaseId="US_20" testCaseName="UserSettings_Check_On_VoiceGuidanceHintsChanged_Event" desc="Check if the event is triggered when the VoiceGuidanceHintsChanged enabled status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+		<testStep testStepId="1" name="Get_VoiceGuidanceHints" method="UserSettings_getVoiceGuidanceHints" saveResult="true" revertGet="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="hints">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_VoiceGuidanceHints" method="UserSettings_setVoiceGuidanceHints" revertSet="yes">
+                <params>
+                        <param tag="hints" usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="hints" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Check_On_VoiceGuidanceHintsChanged_Event" event="Event_On_VoiceGuidanceHintsChanged" action="eventListener" delay="3">
+                <resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="hints">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="hints"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="4" name="Get_VoiceGuidanceHints" method="UserSettings_getVoiceGuidanceHints" revertFlag="yes">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="hints">
+                        <expectedValues usePreviousResult="true" Id="1" useMethodTag="usersettings_toggle_status" arguments="hints"/>
+                </resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 21 -->
+        <testCase testCaseId="US_21" testCaseName="UserSettings_Set_Get_ContentPin" desc="Check whether the contentpin can be successfully set and retrieved">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_ContentPin" method="UserSettings_getContentPin" revertGet="yes">
+                        <resultGeneration useMethodTag="usersettings_get_contentpin_status"/>
+                </testStep>
+                <testStep testStepId="2" name="Set_ContentPin" method="UserSettings_setContentPin" revertSet="yes">
+                <params>
+                        <param tag="contentPin" useConfigFile="true" key="USERSETTINGS_CONTENT_PIN" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_contentPin" method="UserSettings_getContentPin" revertFlag="yes">
+                	<resultGeneration useMethodTag="usersettings_get_contentpin_status">
+                        	<expectedValues useConfigFile="true" key="USERSETTINGS_CONTENT_PIN"/>
+                	</resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 22 -->
+        <testCase testCaseId="US_22" testCaseName="UserSettings_Check_On_ContentPinChanged_Event" desc="Check if the event is triggered when the content pin status changes">
+                <testCaseInfo testCaseType="setandget" revert="true" />
+                <testStep testStepId="1" name="Get_ContentPin" method="UserSettings_getContentPin" revertGet="yes">
+                        <resultGeneration useMethodTag="usersettings_get_contentpin_status"/>
+                </testStep>
+                <testStep testStepId="2" name="Set_ContentPin" method="UserSettings_setContentPin" revertSet="yes">
+                <params>
+                        <param tag="contentPin" useConfigFile="true" key="USERSETTINGS_CONTENT_PIN" revertParam="yes" />
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Check_On_ContentPinChanged_Event" event="Event_On_ContentPinChanged" action="eventListener" delay="3">
+                	<resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="contentPin">
+                        	<expectedValues useConfigFile="true" key="USERSETTINGS_CONTENT_PIN"/>
+                	</resultGeneration>
+                </testStep>
+                <testStep testStepId="4" name="Get_contentPin" method="UserSettings_getContentPin" revertFlag="yes">
+                	<resultGeneration useMethodTag="usersettings_get_contentpin_status">
+                        	<expectedValues useConfigFile="true" key="USERSETTINGS_CONTENT_PIN"/>
+                	</resultGeneration>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 23 -->
+        <testCase testCaseId="US_23" testCaseName="UserSettings_Set_Get_PrivacyMode" desc="Check whether the privacymode can be successfully set and retrieved">
+                <testCaseInfo testCaseType="loop" revert="true" />
+                <testStep testStepId="1" name="Get_PrivacyMode" method="UserSettings_getPrivacyMode" revertGet="yes">
+			<resultGeneration useMethodTag="usersettings_get_status" arguments="privacyMode">
+                        	<expectedValues useDefault="true"/>
+                	</resultGeneration>
+		</testStep>
+		<testStep testStepId="2" name="Set_Get_PrivacyMode" testStepType="loop">
+			<subtestStep subtestStepId="1" name="Set_PrivacyMode" method="UserSettings_setPrivacyMode" revertSet="yes">
+                		<params>
+                        		<param tag="privacyMode" useConfigFile="true" key="USERSETTINGS_PRIVACY_MODE" iteration="true" revertParam="yes"/>
+                		</params>
+                	</subtestStep>
+			<subtestStep subtestStepId="2" name="Get_PrivacyMode" method="UserSettings_getPrivacyMode" revertFlag="yes">
+                		<resultGeneration useMethodTag="usersettings_get_status" arguments="privacyMode">
+                        		<expectedValues useIterableValue="true"/>
+                		</resultGeneration>
+			</subtestStep>
+		</testStep>
+        </testCase>
+
+	<!-- Test case 24 -->
+        <testCase testCaseId="US_24" testCaseName="UserSettings_Check_On_PrivacyModeChanged_Event" desc="Check if the event is triggered when the privacy mode status changes">
+                <testCaseInfo testCaseType="loop" revert="true" />
+                <testStep testStepId="1" name="Get_PrivacyMode" method="UserSettings_getPrivacyMode" revertGet="yes">
+                        <resultGeneration useMethodTag="usersettings_get_status" arguments="privacyMode">
+                                <expectedValues useDefault="true"/>
+                        </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Get_PrivacyMode" testStepType="loop">
+                        <subtestStep subtestStepId="1" name="Set_PrivacyMode" method="UserSettings_setPrivacyMode" revertSet="yes">
+                                <params>
+                                        <param tag="privacyMode" useConfigFile="true" key="USERSETTINGS_PRIVACY_MODE" iteration="true" revertParam="yes"/>
+                                </params>
+                        </subtestStep>
+			<subtestStep subtestStepId="2" name="Check_On_PrivacyModeChanged_Event" event="Event_On_PrivacyModeChanged" action="eventListener" delay="3">
+                                <resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="privacyMode">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+                        </subtestStep>
+			<subtestStep subtestStepId="3" name="Get_PrivacyMode" method="UserSettings_getPrivacyMode" revertFlag="yes">
+                                <resultGeneration useMethodTag="usersettings_get_status" arguments="privacyMode">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+                        </subtestStep>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 25 -->
+        <testCase testCaseId="US_25" testCaseName="UserSettings_Set_Get_PreferredAudioLanguages" desc="Check whether the preferred audio languages can be successfully set and retrieved">
+                <testCaseInfo testCaseType="loop" revert="true" />
+                <testStep testStepId="1" name="Get_PreferredAudioLanguages" method="UserSettings_getPreferredAudioLanguages" revertGet="yes">
+			<resultGeneration useMethodTag="usersettings_get_api_info" arguments="preferredLanguages"/>
+                </testStep>
+                <testStep testStepId="2" name="Set_Get_PreferredAudioLanguages" testStepType="loop">
+                        <subtestStep subtestStepId="1" name="Set_PreferredAudioLanguages" method="UserSettings_setPreferredAudioLanguages" revertSet="yes">
+                                <params>
+                                        <param tag="preferredLanguages" useConfigFile="true" key="USERSETTINGS_PREFERRED_AUDIOLANGUAGES" iteration="true" revertParam="yes"/>
+                                </params>
+                        </subtestStep>
+                        <subtestStep subtestStepId="2" name="Get_PreferredAudioLanguages" method="UserSettings_getPreferredAudioLanguages" revertFlag="yes">
+                                <resultGeneration useMethodTag="usersettings_get_status" arguments="preferredLanguages">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+                        </subtestStep>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 26 -->
+        <testCase testCaseId="US_26" testCaseName="UserSettings_Check_On_PreferredAudioLanguagesChanged_Event" desc="Check if the event is triggered when the preferred audio languages status changes">
+                <testCaseInfo testCaseType="loop" revert="true" />
+                <testStep testStepId="1" name="Get_PreferredAudioLanguages" method="UserSettings_getPreferredAudioLanguages" revertGet="yes">
+                        <resultGeneration useMethodTag="usersettings_get_api_info" arguments="preferredLanguages"/>
+                </testStep>
+                <testStep testStepId="2" name="Set_Get_PreferredAudioLanguages" testStepType="loop">
+                        <subtestStep subtestStepId="1" name="Set_PreferredAudioLanguages" method="UserSettings_setPreferredAudioLanguages" revertSet="yes">
+                                <params>
+                                        <param tag="preferredLanguages" useConfigFile="true" key="USERSETTINGS_PREFERRED_AUDIOLANGUAGES" iteration="true" revertParam="yes"/>
+                                </params>
+                        </subtestStep>
+			<subtestStep subtestStepId="2" name="Check_On_PreferredAudioLanguagesChanged_Event" event="Event_On_PreferredAudioLanguagesChanged" action="eventListener" delay="3">
+                                <resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="preferredLanguages">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+			</subtestStep>
+			<subtestStep subtestStepId="3" name="Get_PreferredAudioLanguages" method="UserSettings_getPreferredAudioLanguages" revertFlag="yes">
+                                <resultGeneration useMethodTag="usersettings_get_status" arguments="preferredLanguages">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+                        </subtestStep>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 27 -->
+        <testCase testCaseId="US_27" testCaseName="UserSettings_Set_Get_PresentationLanguage" desc="Check whether the presentation language can be successfully set and retrieved">
+                <testCaseInfo testCaseType="loop" revert="true" />
+                <testStep testStepId="1" name="Get_PresentationLanguage" method="UserSettings_getPresentationLanguage" revertGet="yes">
+                        <resultGeneration useMethodTag="usersettings_get_api_info" arguments="presentationLanguage"/>
+                </testStep>
+                <testStep testStepId="2" name="Set_Get_PresentationLanguage" testStepType="loop">
+                        <subtestStep subtestStepId="1" name="Set_PresentationLanguage" method="UserSettings_setPresentationLanguage" revertSet="yes">
+                                <params>
+                                        <param tag="presentationLanguage" useConfigFile="true" key="USERSETTINGS_PRESENTATION_LANGUAGES" iteration="true" revertParam="yes"/>
+                                </params>
+                        </subtestStep>
+                        <subtestStep subtestStepId="2" name="Get_PresentationLanguage" method="UserSettings_getPresentationLanguage" revertFlag="yes">
+                                <resultGeneration useMethodTag="usersettings_get_status" arguments="presentationLanguage">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+                        </subtestStep>
+                </testStep>
+        </testCase>
+
+	<!-- Test case 28 -->
+        <testCase testCaseId="US_28" testCaseName="UserSettings_Check_On_PresentationLanguageChanged_Event" desc="Check if the event is triggered when the presentation language status changes">
+                <testCaseInfo testCaseType="loop" revert="true" />
+                <testStep testStepId="1" name="Get_PresentationLanguage" method="UserSettings_getPresentationLanguage" revertGet="yes">
+                        <resultGeneration useMethodTag="usersettings_get_api_info" arguments="presentationLanguage"/>
+                </testStep>
+                <testStep testStepId="2" name="Set_Get_PresentationLanguage" testStepType="loop">
+			<subtestStep subtestStepId="1" name="Set_PresentationLanguage" method="UserSettings_setPresentationLanguage" revertSet="yes">
+                                <params>
+                                        <param tag="presentationLanguage" useConfigFile="true" key="USERSETTINGS_PRESENTATION_LANGUAGES" iteration="true" revertParam="yes"/>
+                                </params>
+                        </subtestStep>
+			<subtestStep subtestStepId="2" name="Check_On_PresentationLanguageChanged_Event" event="Event_On_PresentationLanguageChanged" action="eventListener" delay="3">
+				<resultGeneration useMethodTag="usersettings_check_state_change_event" arguments="presentationLanguage">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+                        </subtestStep>
+			<subtestStep subtestStepId="3" name="Get_PresentationLanguage" method="UserSettings_getPresentationLanguage" revertFlag="yes">
+                                <resultGeneration useMethodTag="usersettings_get_status" arguments="presentationLanguage">
+                                        <expectedValues useIterableValue="true"/>
+                                </resultGeneration>
+                        </subtestStep>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 29 -->
+        <testCase testCaseId="US_29" testCaseName="UserSettings_Audio_Description_With_Empty_String" desc="Verify setAudioDescription with enabled set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct" />
+                <testStep testStepId="1" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Audio_Description_Empty_String" method="UserSettings_Negative_setAudioDescription">
+                <params>
+                        <param tag="enabled" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                        <resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 30 -->
+        <testCase testCaseId="US_30" testCaseName="UserSettings_Audio_Description_With_Specialchars" desc="Verify setAudioDescription with enabled set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct" />
+                <testStep testStepId="1" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Audio_Description_Specialchars" method="UserSettings_Negative_setAudioDescription">
+                <params>
+                        <param tag="enabled" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                        <resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 31 -->
+        <testCase testCaseId="US_31" testCaseName="UserSettings_Audio_Description_With_NumericValue" desc="Verify setAudioDescription with enabled set to a numeric value to ensure the API rejects non-boolean input">
+                <testCaseInfo testCaseType="direct" />
+                <testStep testStepId="1" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Audio_Description_NumericValue" method="UserSettings_Numeric_setAudioDescription">
+                <params>
+                        <param tag="enabled" value="1234"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                        <resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 32 -->
+        <testCase testCaseId="US_32" testCaseName="UserSettings_Audio_Description_Without_Params" desc="Verify the setAudioDescription API behavior when the enabled parameter is omitted, to ensure it handles the scenario correctly">
+                <testCaseInfo testCaseType="direct" />
+                <testStep testStepId="1" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Audio_Description_Without_Params" method="UserSettings_Negative_setAudioDescription"/>
+                <testStep testStepId="3" name="Get_Audio_Description" method="UserSettings_getAudioDescription">
+                        <resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 33 -->
+        <testCase testCaseId="US_33" testCaseName="UserSettings_Caption_With_Empty_String" desc="Verify setCaptions with enabled set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_Caption" method="UserSettings_getCaptions">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Caption_Empty_String" method="UserSettings_Negative_setCaptions">
+                <params>
+                        <param tag="enabled" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_Caption" method="UserSettings_getCaptions">
+                	<resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 34 -->
+        <testCase testCaseId="US_34" testCaseName="UserSettings_Caption_With_Specialchars" desc="Verify setCaptions with enabled set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_Caption" method="UserSettings_getCaptions">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Caption_Specialchars" method="UserSettings_Negative_setCaptions">
+                <params>
+                        <param tag="enabled" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_Caption" method="UserSettings_getCaptions">
+                        <resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 35 -->
+        <testCase testCaseId="US_35" testCaseName="UserSettings_Caption_With_NumericValue" desc="Verify setCaptions with enabled set to a numeric value to ensure the API rejects non-boolean input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_Caption" method="UserSettings_getCaptions">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_Caption_NumericValue" method="UserSettings_Numeric_setCaptions">
+                <params>
+                        <param tag="enabled" value="1234"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_Caption" method="UserSettings_getCaptions">
+                        <resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 36 -->
+        <testCase testCaseId="US_36" testCaseName="UserSettings_Caption_Without_Params" desc="Verify the setCaptions API behavior when the enabled parameter is omitted, to ensure it handles the scenario correctly">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_Caption" method="UserSettings_getCaptions">
+                <resultGeneration useMethodTag="usersettings_get_enabled_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+		<testStep testStepId="2" name="Set_Caption_Without_Params" method="UserSettings_Negative_setCaptions"/>
+                <testStep testStepId="3" name="Get_Caption" method="UserSettings_getCaptions">
+                        <resultGeneration useMethodTag="usersettings_get_enabled_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 37 -->
+        <testCase testCaseId="US_37" testCaseName="UserSettings_PinControl_With_Empty_String" desc="Verify setPinControl with pinControl set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinControl" method="UserSettings_getPinControl">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinControl_Empty_String" method="UserSettings_Negative_setPinControl">
+                <params>
+                        <param tag="pinControl" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinControl" method="UserSettings_getPinControl">
+                	<resultGeneration useMethodTag="usersettings_get_pinControl_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 38 -->
+        <testCase testCaseId="US_38" testCaseName="UserSettings_PinControl_With_Specialchars" desc="Verify setPinControl with pinControl set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinControl" method="UserSettings_getPinControl">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinControl_Specialchars" method="UserSettings_Negative_setPinControl">
+                <params>
+                        <param tag="pinControl" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinControl" method="UserSettings_getPinControl">
+                        <resultGeneration useMethodTag="usersettings_get_pinControl_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 39 -->
+        <testCase testCaseId="US_39" testCaseName="UserSettings_PinControl_With_NumericValue" desc="Verify setPinControl with pinControl set to a numeric value to ensure the API rejects non-boolean input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinControl" method="UserSettings_getPinControl">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinControl_NumericValue" method="UserSettings_Numeric_setPinControl">
+                <params>
+                        <param tag="pinControl" value="1234"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinControl" method="UserSettings_getPinControl">
+                        <resultGeneration useMethodTag="usersettings_get_pinControl_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 40 -->
+        <testCase testCaseId="US_40" testCaseName="UserSettings_PinControl_Without_Params" desc="Verify setPinControl API behavior when the pinControl parameter is omitted, to ensure it handles the scenario correctly">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinControl" method="UserSettings_getPinControl">
+                <resultGeneration useMethodTag="usersettings_get_pinControl_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinControl_Without_Params" method="UserSettings_Negative_setPinControl"/>
+                <testStep testStepId="3" name="Get_PinControl" method="UserSettings_getPinControl">
+                        <resultGeneration useMethodTag="usersettings_get_pinControl_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 41 -->
+        <testCase testCaseId="US_41" testCaseName="UserSettings_LiveWatershed_With_Empty_String" desc="Verify setLiveWatershed with liveWatershed set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_LiveWatershed_Empty_String" method="UserSettings_Negative_setLiveWatershed">
+                <params>
+                        <param tag="liveWatershed" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_liveWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 42 -->
+        <testCase testCaseId="US_42" testCaseName="UserSettings_LiveWatershed_With_Specialchars" desc="Verify setLiveWatershed with liveWatershed set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_LiveWatershed_Specialchars" method="UserSettings_Negative_setLiveWatershed">
+                <params>
+                        <param tag="liveWatershed" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_liveWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 43 -->
+        <testCase testCaseId="US_43" testCaseName="UserSettings_LiveWatershed_With_NumericValue" desc="Verify setLiveWatershed with liveWatershed set to a numeric value to ensure the API rejects non-boolean input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_LiveWatershed_NumericValue" method="UserSettings_Numeric_setLiveWatershed">
+                <params>
+                        <param tag="liveWatershed" value="1234"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_liveWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 44 -->
+        <testCase testCaseId="US_44" testCaseName="UserSettings_LiveWatershed_Without_Params" desc="Verify setLiveWatershed API behavior when the liveWatershed parameter is omitted, to ensure it handles the scenario correctly">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                <resultGeneration useMethodTag="usersettings_get_liveWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_LiveWatershed_Without_Params" method="UserSettings_Negative_setLiveWatershed"/>
+                <testStep testStepId="3" name="Get_LiveWatershed" method="UserSettings_getLiveWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_liveWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 45 -->
+        <testCase testCaseId="US_45" testCaseName="UserSettings_PlaybackWatershed_With_Empty_String" desc="Verify setPlaybackWatershed with playbackWatershed set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PlaybackWatershed_Empty_String" method="UserSettings_Negative_setPlaybackWatershed">
+                <params>
+                        <param tag="playbackWatershed" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 46 -->
+        <testCase testCaseId="US_46" testCaseName="UserSettings_PlaybackWatershed_With_Specialchars" desc="Verify setPlaybackWatershed with playbackWatershed set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PlaybackWatershed_Specialchars" method="UserSettings_Negative_setPlaybackWatershed">
+                <params>
+                        <param tag="playbackWatershed" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 47 -->
+        <testCase testCaseId="US_47" testCaseName="UserSettings_PlaybackWatershed_With_NumericValue" desc="Verify setPlaybackWatershed with playbackWatershed set to a numeric value to ensure the API rejects non-boolean input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PlaybackWatershed_NumericValue" method="UserSettings_Numeric_setPlaybackWatershed">
+                <params>
+                        <param tag="playbackWatershed" value="1234"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 48 -->
+        <testCase testCaseId="US_48" testCaseName="UserSettings_PlaybackWatershed_Without_Params" desc="Verify setPlaybackWatershed API behavior when the playbackWatershed parameter is omitted, to ensure it handles the scenario correctly">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PlaybackWatershed_Without_Params" method="UserSettings_Negative_setPlaybackWatershed"/>
+                <testStep testStepId="3" name="Get_PlaybackWatershed" method="UserSettings_getPlaybackWatershed">
+                        <resultGeneration useMethodTag="usersettings_get_playbackWatershed_status" expectedValues="false" arguments="negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 49 -->
+        <testCase testCaseId="US_49" testCaseName="UserSettings_BlockNotRatedContent_With_Empty_String" desc="Verify setBlockNotRatedContent with blockNotRatedContent set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_BlockNotRatedContent_Empty_String" method="UserSettings_Negative_setBlockNotRatedContent">
+                <params>
+                        <param tag="blockNotRatedContent" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="blockNotRatedContent,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 50 -->
+        <testCase testCaseId="US_50" testCaseName="UserSettings_BlockNotRatedContent_With_Specialchars" desc="Verify setBlockNotRatedContent with blockNotRatedContent set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_BlockNotRatedContent_Specialchars" method="UserSettings_Negative_setBlockNotRatedContent">
+                <params>
+                        <param tag="blockNotRatedContent" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="blockNotRatedContent,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 51 -->
+        <testCase testCaseId="US_51" testCaseName="UserSettings_BlockNotRatedContent_With_NumericValue" desc="Verify setBlockNotRatedContent with blockNotRatedContent set to a numeric value to ensure the API rejects non-boolean input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_BlockNotRatedContent_NumericValue" method="UserSettings_Numeric_setBlockNotRatedContent">
+                <params>
+                        <param tag="blockNotRatedContent" value="1234"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="blockNotRatedContent,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 52 -->
+        <testCase testCaseId="US_52" testCaseName="UserSettings_BlockNotRatedContent_Without_Params" desc="Verify setBlockNotRatedContent API behavior when the blockNotRatedContent parameter is omitted, to ensure it handles the scenario correctly">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="blockNotRatedContent">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_BlockNotRatedContent_Specialchars" method="UserSettings_Negative_setBlockNotRatedContent"/>
+                <testStep testStepId="3" name="Get_BlockNotRatedContent" method="UserSettings_getBlockNotRatedContent">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="blockNotRatedContent,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 53 -->
+        <testCase testCaseId="US_53" testCaseName="UserSettings_PinOnPurchase_With_Empty_String" desc="Verify setPinOnPurchase with pinOnPurchase set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinOnPurchase_Empty_String" method="UserSettings_Negative_setPinOnPurchase">
+                <params>
+                        <param tag="pinOnPurchase" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="pinOnPurchase,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 54 -->
+        <testCase testCaseId="US_54" testCaseName="UserSettings_PinOnPurchase_With_Specialchars" desc="Verify setPinOnPurchase with pinOnPurchase set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinOnPurchase_Specialchars" method="UserSettings_Negative_setPinOnPurchase">
+                <params>
+                        <param tag="pinOnPurchase" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="pinOnPurchase,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 55 -->
+        <testCase testCaseId="US_55" testCaseName="UserSettings_PinOnPurchase_With_NumericValue" desc="Verify setPinOnPurchase with pinOnPurchase set to a numeric value to ensure the API rejects non-boolean input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinOnPurchase_NumericValue" method="UserSettings_Numeric_setPinOnPurchase">
+                <params>
+                        <param tag="pinOnPurchase" value="1234"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="pinOnPurchase,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 56 -->
+        <testCase testCaseId="US_56" testCaseName="UserSettings_PinOnPurchase_Without_Params" desc="Verify setPinOnPurchase API behavior when the pinOnPurchase parameter is omitted, to ensure it handles the scenario correctly">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="pinOnPurchase">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_PinOnPurchase_Without_Params" method="UserSettings_Negative_setPinOnPurchase"/>
+                <testStep testStepId="3" name="Get_PinOnPurchase" method="UserSettings_getPinOnPurchase">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="pinOnPurchase,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 57 -->
+        <testCase testCaseId="US_57" testCaseName="UserSettings_HighContrast_With_Empty_String" desc="Verify setHighContrast with enabled set to an empty string to ensure the API handles empty values appropriately">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_HighContrast" method="UserSettings_getHighContrast">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_HighContrast_Empty_String" method="UserSettings_Negative_setHighContrast">
+                <params>
+                        <param tag="enabled" value=""/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_HighContrast" method="UserSettings_getHighContrast">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="enabled,negative"/>
+                </testStep>
+        </testCase>
+
+        <!-- Test case 58 -->
+        <testCase testCaseId="US_58" testCaseName="UserSettings_HighContrast_With_Specialchars" desc="Verify setHighContrast with enabled set to a special character to ensure the API rejects special character input">
+                <testCaseInfo testCaseType="direct"/>
+                <testStep testStepId="1" name="Get_HighContrast" method="UserSettings_getHighContrast">
+                <resultGeneration useMethodTag="usersettings_get_status" arguments="enabled">
+                        <expectedValues useDefault="true"/>
+                </resultGeneration>
+                </testStep>
+                <testStep testStepId="2" name="Set_HighContrast_Specialchars" method="UserSettings_Negative_setHighContrast">
+                <params>
+                        <param tag="enabled" value="@#$%^*()"/>
+                </params>
+                </testStep>
+                <testStep testStepId="3" name="Get_HighContrast" method="UserSettings_getHighContrast">
+                        <resultGeneration useMethodTag="usersettings_get_status" expectedValues="false" arguments="enabled,negative"/>
+                </testStep>
+        </testCase>
+</testPlugin>
